@@ -9,7 +9,8 @@ With `mode: "auto"` and default `autoBind: "adaptive"`: in a normal single-agent
 ## Multi-Agent Environments
 
 - A child session is detected when `ctx.session.get` returns a non-empty `parentID`.
-- Restrictive `skill` rules on subagents in `ctx.agent.list()` signal an orchestrated workspace without checking any vendor-specific agent names.
+- Restrictive permissions on `subagent` roles in `ctx.agent.list()` (`skill`, `edit`, `shell`/`bash`, `subagent`/`task`, `question`, or `*` with `deny`/`ask`) signal an orchestrated workspace without checking any vendor-specific agent names.
+- Synthetic/internal prompts (`synthetic: true` / `internal: true`) skip automatic binding and hints unless explicit `skill:<id>` or `requiredSkills` are provided.
 - Default `adaptive` mode does not force automatic skills onto primary/manager sessions; workers are evaluated within their role/permission scope.
 - When `ctx.agent.list()` is available, ordered `action/resource/effect` rules filter automatic candidates to explicit `allow` decisions. This narrows **only the plugin's own proposed attachments**; the host remains the authoritative enforcement boundary.
 - If another plugin has already populated `prompt.skills`, `coexistence: "respect"` suppresses new automatic additions. `requiredSkills` and explicit user selections remain atomic.

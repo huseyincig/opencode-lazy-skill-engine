@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.4
+
+- Verify packed-artifact (`npm pack`) installation and loading inside an isolated `opencode v2.3.0 --standalone` sandbox (`debug agents` and `debug config`).
+- Align `README.md`, `docs/ARCHITECTURE.md`, `docs/COEXISTENCE.md`, and `docs/QUALITY.md` with all v1.4.3–v1.4.4 capabilities, hooks, and verification gates.
+
 ## 1.4.3
 
 - Add camelCase/acronym boundary splitting in `tokenize()` and conservative Turkish/English suffix stemming in `variants()` with weighted stem alternatives in `search()`.
