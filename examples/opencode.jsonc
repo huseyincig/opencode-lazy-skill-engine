@@ -1,0 +1,17 @@
+// Copy this directory to ./plugins/lazy-skills or use a published package name.
+// No external agent system, model or fixed OpenCode patch version is required.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [{
+    "package": "./plugins/lazy-skills",
+    "options": {
+      "mode": "auto",
+      "autoBind": "adaptive",
+      "coexistence": "respect",
+      "respectHostPermissions": true,
+      "nativeCatalog": "preserve",
+      "hints": "off",
+      "vaultAutoBind": false
+    }
+  }]
+}

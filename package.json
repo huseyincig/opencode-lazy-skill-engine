@@ -1,0 +1,27 @@
+{
+  "name": "opencode-lazy-skill-engine",
+  "version": "1.4.2",
+  "private": true,
+  "description": "Host-neutral, multilingual, cooperative lazy skill discovery and binding for OpenCode V2",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@opencode/plugin": ">=2 <3"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node scripts/check.mjs",
+    "benchmark": "node tests/benchmark.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
