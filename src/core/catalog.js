@@ -4,9 +4,10 @@ import { clipped } from './text.js';
 import { LANGUAGES } from './concepts.js';
 import { parseFrontmatter } from './scanner.js';
 import { inside } from './security.js';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve,join } from 'node:path';
 const safeReal=p=>{try{return realpathSync(p);}catch{return resolve(p);}};
+const hasProjectNative=(projectOpenCode,id)=>existsSync(join(projectOpenCode,'skills',id,'SKILL.md'))||existsSync(join(projectOpenCode,'skill',id,'SKILL.md'));
 export function normalizeNative(result, opts) {
   const raw=Array.isArray(result) ? result : result?.skills ?? result?.items ?? result?.data ?? [];
   if(!Array.isArray(raw))throw new Error('Unexpected ctx.skill.list() response');
@@ -16,7 +17,7 @@ export function normalizeNative(result, opts) {
     // prefix, do not open another file or persist its potentially large body.
     const meta=typeof s.content==='string'?parseFrontmatter(s.content.slice(0,opts.maxFrontmatterBytes+16),opts.maxFrontmatterBytes).meta:{};
     const values=(key)=>Array.isArray(s[key])?s[key]:Array.isArray(meta[key])?meta[key]:typeof meta[key]==='string'&&meta[key]?[meta[key]]:[];
-    const origin=typeof s.path==='string' && inside(projectOpenCode,safeReal(s.path))?'project':'host';
+    const origin=(typeof s.path==='string' && inside(projectOpenCode,safeReal(s.path)))||hasProjectNative(projectOpenCode,s.id)?'project':'host';
     return {
       id:s.id,name:clipped(s.name??s.id,100),description:clipped(s.description,700),
       keywords:[...new Set([...(opts.rules[s.id]||[]),...values('keywords')])].slice(0,64),

@@ -54,8 +54,11 @@ export function detectLanguage(text, preferred='auto') {
   }
   return best;
 }
+const TURKISH_SUFFIXES=['larindan','lerinden','lariyla','leriyle','indaki','indeki','masi','mesi','sini','sina','sine','deki','daki','mak','mek','dan','den','tan','ten','nin','nun','lar','ler','lik','luk','ci','yi','yu','si','in','un'];
+const PURE_LATIN=/^[a-z]+$/;
 export function tokenize(text, keepStop=false, language='auto') {
-  const s=fold(text);if(!s)return [];
+  const pre=String(text??'').replace(/([\p{Ll}\p{N}]\p{M}*)(\p{Lu})/gu,'$1 $2').replace(/(\p{Lu}+\p{M}*)(\p{Lu}\p{Ll})/gu,'$1 $2');
+  const s=fold(pre);if(!s)return [];
   const out=[];
   // Fast Unicode-regex path for Latin, Cyrillic, and Indic scripts. Indic combining
   // marks remain in each word; expensive dictionary segmentation is CJK-only.
@@ -78,7 +81,27 @@ export function tokenize(text, keepStop=false, language='auto') {
   }
   return out.filter(t=>(t.length>1||HAN.test(t)) && (keepStop||!stop.has(t))).slice(0,150);
 }
-export function variants(term) {return [term];} // Concept bridge supplies canonical multilingual alternatives.
+export function variants(term) {
+  const word=fold(term);
+  if(word.length<5||!PURE_LATIN.test(word))return [word].filter(Boolean);
+  const out=[word];
+  for(const suffix of TURKISH_SUFFIXES){
+    if(word.endsWith(suffix)){
+      const stem=word.slice(0,word.length-suffix.length);
+      if(stem.length>=3&&!out.includes(stem))out.push(stem);
+      if((suffix==='masi'||suffix==='mesi')&&word.length-2>=3){
+        const verbal=word.slice(0,-2);if(!out.includes(verbal))out.push(verbal);
+      }
+      break;
+    }
+  }
+  if(word.endsWith('ies')&&word.length-2>=3){const s=`${word.slice(0,-3)}y`;if(!out.includes(s))out.push(s);}
+  else if(word.endsWith('ing')&&word.length-3>=3){const s=word.slice(0,-3);if(!out.includes(s))out.push(s);}
+  else if(word.endsWith('ed')&&word.length-2>=3){const s=word.slice(0,-2);if(!out.includes(s))out.push(s);}
+  else if(word.endsWith('es')&&word.length-2>=3){const s=word.slice(0,-2);if(!out.includes(s))out.push(s);}
+  else if(word.endsWith('s')&&!word.endsWith('ss')&&word.length-1>=3){const s=word.slice(0,-1);if(!out.includes(s))out.push(s);}
+  return out;
+}
 export function parseQuery(query, maxChars=12000) {
   if(typeof query!=='string')throw new TypeError('query must be a string');
   const input=query.slice(0,maxChars);

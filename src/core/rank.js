@@ -1,4 +1,4 @@
-import { fold, tokenize, parseQuery, editDistanceWithinOne } from './text.js';
+import { fold, tokenize, parseQuery, editDistanceWithinOne, variants } from './text.js';
 import { matchConcepts } from './concepts.js';
 import { negativeTriggerMatch } from './selection.js';
 
@@ -8,8 +8,12 @@ const isEastAsian=s=>/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.t
 const conceptToken=t=>C+t;
 function features(text){
   const words=tokenize(text,true);
-  for(const concept of matchConcepts(text).keys()) words.push(conceptToken(concept));
-  return words;
+  const expanded=[...words];
+  for(const w of words){
+    for(const v of variants(w))if(v!==w)expanded.push(v);
+  }
+  for(const concept of matchConcepts(text).keys()) expanded.push(conceptToken(concept));
+  return expanded;
 }
 /** Sparse inverted postings: candidate evaluation costs depend on matching docs, not total skill count. */
 export function createSearchIndex(skills, weights={}) {
@@ -99,7 +103,8 @@ export function search(index,query,options={}){
   const neg=termsFor(parsed.negativeRaw,parsed.negative,parsed.negativeConcepts);
   const alternatives=new Map(),ids=new Set();
   for(const term of pos){
-    const alts=[{term,weight:1},...fuzzyAlternatives(index,term)];alternatives.set(term,alts);
+    const stemAlts=term.startsWith(C)?[]:variants(term).filter(v=>v!==term).map(v=>({term:v,weight:0.85}));
+    const alts=[{term,weight:1},...stemAlts,...fuzzyAlternatives(index,term)];alternatives.set(term,alts);
     for(const a of alts)for(const id of index.postings.get(a.term)??[])ids.add(id);
   }
   if(parsed.explicit){

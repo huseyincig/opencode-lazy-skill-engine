@@ -86,8 +86,8 @@ export function createPlugin() {
       const catalog=new Catalog(ctx,opts);
       const sessions=new SessionLedger(opts);
       const hostPolicy=new HostSkillPolicy(ctx.agent);
-      const generate=ctx.experimental?.generate?.text;
-      const semantic=new SemanticRouter(opts.semantic,typeof generate==='function'?input=>generate.call(ctx.experimental.generate,input):undefined);
+      const genDomain=typeof ctx.experimental?.generate?.text==='function'?ctx.experimental.generate:typeof ctx.generate?.text==='function'?ctx.generate:undefined;
+      const semantic=new SemanticRouter(opts.semantic,genDomain?input=>genDomain.text(input):undefined);
       const registrations=[];
       let disposed=false;
       const cleanup=async()=>{
@@ -121,26 +121,36 @@ export function createPlugin() {
         editor.namespace({name:'lazy_skill',description:'Adaptive on-demand skill discovery and safe vault access. Native skills retain native permission checks.'});
         editor.add({
           name:'search', description:'Find useful native or vault skills using lexical, phrase, fuzzy and BM25-style ranking. Search BEFORE loading large skill bodies.',
-          input:objectInput({query:str('What skill or workflow do you need? Use * to list.'),top_k:integer('Number of results (1-30)'),scope:{type:'string',enum:['native','vault'],description:'Optional source filter'},detail:{type:'string',enum:['ids','summary','full'],description:'Output size; default is summary'}},['query']),
+          input:objectInput({query:{anyOf:[str('What skill or workflow do you need? Use * to list.'),{type:'array',items:str('Search term'),maxItems:30}]},top_k:integer('Number of results (1-30)'),scope:{type:'string',enum:['native','vault'],description:'Optional source filter'},detail:{type:'string',enum:['ids','summary','full'],description:'Output size; default is summary'}},['query']),
           options:{namespace:'lazy_skill',codemode:false},
           execute:async(input,context)=>{
             abortIfNeeded(context);
-            if(typeof input.query!=='string'||input.query.length>1000)throw new Error('Query must be text up to 1000 characters');
-            const hits=await catalog.search(input.query,{topK:input.top_k??opts.maxResults,scope:input.scope});
+            const rawQuery=Array.isArray(input.query)?input.query.filter(x=>typeof x==='string').join(' '):input.query;
+            if(typeof rawQuery!=='string'||rawQuery.length>1000)throw new Error('Query must be text up to 1000 characters');
+            const hits=await catalog.search(rawQuery,{topK:input.top_k??opts.maxResults,scope:input.scope});
             const detail=['ids','summary','full'].includes(input.detail)?input.detail:opts.searchDetail;
             const results=hits.map(({skill,score,coverage,matched})=>detail==='ids'
               ?{id:skill.id,scope:skill.scope,score}
               :detail==='full'
                 ?{...publicSkill(skill),triggers:skill.triggers,aliases:skill.aliases,score,coverage,matched,load:skill.scope==='native'?'native skill':'lazy_skill_load'}
                 :{id:skill.id,scope:skill.scope,origin:skill.origin??'host',description:clipped(skill.description,140),score,coverage,load:skill.scope==='native'?'native skill':'lazy_skill_load'});
-            return result({query:clipped(input.query,200),language:detectLanguage(input.query,opts.language),detail,results,total:hits.length});
+            return result({query:clipped(rawQuery,200),language:detectLanguage(rawQuery,opts.language),detail,results,total:hits.length});
           }
         });
         editor.add({
-          name:'info',description:'Inspect one skill’s metadata, origin and reference file list without loading its main SKILL.md.',
-          input:objectInput({id:str('Exact skill id')},['id']),options:{namespace:'lazy_skill',codemode:false},
+          name:'info',description:'Inspect one or more skills’ metadata, origin and reference file list without loading their main SKILL.md.',
+          input:objectInput({id:str('Exact skill id'),ids:{type:'array',items:str('Exact skill id'),maxItems:20}},[]),options:{namespace:'lazy_skill',codemode:false},
           execute:async(input,context)=>{
             abortIfNeeded(context);
+            if(Array.isArray(input.ids)){
+              const list=[];
+              for(const raw of input.ids.slice(0,20)){
+                const id=checkID(raw);const skill=await catalog.get(id);
+                if(!skill)list.push({id,error:'Skill not found'});
+                else list.push({...publicSkill(skill),resources:await listResources(skill),load:skill.scope==='native'?'Use built-in skill tool if permitted':'Use lazy_skill_load'});
+              }
+              return result({results:list});
+            }
             const id=checkID(input.id);const skill=await catalog.get(id);
             if(!skill)return result({error:'Skill not found'});
             return result({...publicSkill(skill),resources:await listResources(skill),load:skill.scope==='native'?'Use built-in skill tool if permitted':'Use lazy_skill_load'});
@@ -227,6 +237,10 @@ export function createPlugin() {
           const sourceText=text.slice(0,opts.maxPromptChars);
           const sessionID=event?.sessionID;
           if(typeof sessionID!=='string'||!sessionID)return;
+          const evMeta=readObj(event.metadata);
+          const prMeta=readObj(event?.prompt?.metadata);
+          const syntheticTurn=event?.synthetic===true||evMeta.synthetic===true||prMeta.synthetic===true||evMeta.internal===true||prMeta.internal===true;
+          if(syntheticTurn && !readObj(evMeta.lazySkill).requiredSkills?.length && !extractExplicit(sourceText,opts.maxPromptChars).length)return;
 
           let attached=false;
           if(needsBinding){
@@ -289,7 +303,7 @@ export function createPlugin() {
                 const saved=taskID?sessions.getTaskSelection(sessionID,taskID):undefined;
                 const infoModel=readObj(sessionInfo.model);
                 const model=modelFromString(opts.semantic.model)||(
-                  typeof infoModel.providerID==='string'&&typeof infoModel.id==='string'?{providerID:infoModel.providerID,id:infoModel.id}:undefined
+                  typeof infoModel.providerID==='string'&&typeof infoModel.id==='string'?{providerID:infoModel.providerID,id:infoModel.id,...(typeof infoModel.variant==='string'&&infoModel.variant?{variant:infoModel.variant}:{})}:undefined
                 );
                 const additions=saved??await semantic.select({promptText:sourceText,model,sessionID,taskID,
                   candidates:available.filter(s=>candidates.has(s.id)&&!plan.ids.includes(s.id)&&!negativeTriggerMatch(sourceText,s)),maxActive:limit-plan.ids.length});
@@ -351,6 +365,17 @@ export function createPlugin() {
           if(!hint)return;
           event.prompt.text=text+hint;
           for(const hit of suggestions)sessions.markHint(sessionID,hit.skill.id);
+        }));
+      }
+      if(opts.nativeCatalog==='hide'&&typeof ctx.session?.hook==='function'){
+        const SENTINEL='<lazy_skill_catalog';
+        const guidance=`${SENTINEL} advisory="true">\nSkills are loaded on demand. Search with lazy_skill_search, inspect metadata with lazy_skill_info, then use the built-in skill tool for native entries or lazy_skill_load for vault entries.\n</lazy_skill_catalog>`;
+        registrations.push(await ctx.session.hook('context',async event=>{
+          if(disposed||!Array.isArray(event?.system))return;
+          if(event.system.some(p=>p?.type==='text'&&typeof p.text==='string'&&p.text.includes(SENTINEL)))return;
+          const st=await catalog.refresh();
+          if(st.items.size===0)return;
+          event.system.push({type:'text',text:guidance});
         }));
       }
       return cleanup;

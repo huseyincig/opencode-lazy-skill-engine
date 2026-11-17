@@ -2,8 +2,11 @@
 import { createHash } from 'node:crypto';
 export function parseSemanticIDs(text,allowed,maxActive=3){
   if(typeof text!=='string'||text.length>4096)return [];
+  const trimmed=text.trim();
+  const fenced=/^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  const candidate=fenced?fenced[1].trim():trimmed;
   let obj;
-  try{obj=JSON.parse(text.trim());}catch{return [];}
+  try{obj=JSON.parse(candidate);}catch{return [];}
   if(!obj || Array.isArray(obj)||typeof obj!=='object'||!Array.isArray(obj.skills))return [];
   const result=[];
   for(const id of obj.skills){
@@ -14,8 +17,11 @@ export function parseSemanticIDs(text,allowed,maxActive=3){
 }
 function modelFromString(value){
   if(typeof value!=='string')return undefined;
-  const idx=value.indexOf('/');if(idx<1||idx===value.length-1)return undefined;
-  return {providerID:value.slice(0,idx),id:value.slice(idx+1)};
+  const hash=value.indexOf('#');
+  const base=hash>0?value.slice(0,hash):value;
+  const variant=hash>0&&hash<value.length-1?value.slice(hash+1):undefined;
+  const idx=base.indexOf('/');if(idx<1||idx===base.length-1)return undefined;
+  return variant?{providerID:base.slice(0,idx),id:base.slice(idx+1),variant}:{providerID:base.slice(0,idx),id:base.slice(idx+1)};
 }
 export {modelFromString};
 export class SemanticRouter {

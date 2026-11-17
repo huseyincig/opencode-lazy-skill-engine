@@ -38,11 +38,12 @@ function normalizeAgentList(result) {
   return agents?.filter(item => item && typeof item.id === 'string').slice(0, 256) ?? null;
 }
 
-/** A roster with explicitly restricted specialist skill grants indicates an orchestrated workspace. */
+const ORCHESTRATED_ACTIONS = new Set(['skill', 'edit', 'shell', 'bash', 'subagent', 'task', 'question', '*']);
+/** A roster with explicitly restricted specialist subagents indicates an orchestrated workspace. */
 export function isOrchestratedRoster(agents) {
   return Array.isArray(agents) && agents.some(agent =>
     agent?.mode === 'subagent' && Array.isArray(agent.permissions) &&
-    agent.permissions.some(rule => rule?.action === 'skill' && (rule.effect === 'deny' || rule.effect === 'ask'))
+    agent.permissions.some(rule => ORCHESTRATED_ACTIONS.has(rule?.action) && (rule.effect === 'deny' || rule.effect === 'ask'))
   );
 }
 

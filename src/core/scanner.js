@@ -9,15 +9,27 @@ const GLOBAL_VAULT_ROOT=resolve(join(homedir(),'.config','opencode','skill-vault
 
 const ignored = new Set(['.git','.hg','.svn','node_modules','.next','dist','build','.cache','__pycache__']);
 const validID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+function disallowedYaml(v){const t=v.trim();return t.startsWith('&')||t.startsWith('*')||t.startsWith('!');}
+function stripInlineComment(v){
+  let quote=null;
+  for(let i=0;i<v.length;i++){
+    const ch=v[i];
+    if(quote==='"'){if(ch==='\\'&&i+1<v.length){i++;continue;}if(ch==='"')quote=null;}
+    else if(quote==="'"){if(ch==="'"&&v[i+1]==="'"){i++;continue;}if(ch==="'")quote=null;}
+    else if(ch==='"'||ch==="'")quote=ch;
+    else if(ch==='#'&&(i===0||/\s/.test(v[i-1])))return v.slice(0,i).trim();
+  }
+  return v.trim();
+}
 function scalar(v) {
-  const x=v.trim();
+  const x=stripInlineComment(v);
   if ((x.startsWith('"') && x.endsWith('"')) || (x.startsWith("'") && x.endsWith("'"))) return x.slice(1,-1).replace(/\\(["'\\])/g,'$1');
   return x;
 }
 function list(v) {
-  const s=v.trim();
-  if(s.startsWith('[') && s.endsWith(']')) return s.slice(1,-1).split(/,(?=(?:[^"']|"[^"]*"|'[^']*')*$)/).map(scalar).filter(Boolean);
-  return s ? [scalar(s)] : [];
+  const s=stripInlineComment(v);
+  if(s.startsWith('[') && s.endsWith(']')) return s.slice(1,-1).split(/,(?=(?:[^"']|"[^"]*"|'[^']*')*$)/).map(scalar).filter(x=>x&&!disallowedYaml(x));
+  return s&&!disallowedYaml(s) ? [scalar(s)] : [];
 }
 /** Intentionally bounded YAML frontmatter parser; no YAML tags, anchors or execution. */
 export function parseFrontmatter(data, maxFrontmatterBytes=8192) {
@@ -33,8 +45,19 @@ export function parseFrontmatter(data, maxFrontmatterBytes=8192) {
   const meta={};let current=null, block=false;
   for(const line of fm.split(/\r?\n/)) {
     const kv=/^([a-zA-Z][\w/-]*):\s*(.*)$/.exec(line);
-    if(kv){current=kv[1];block=/^[|>][+-]?$/.test(kv[2]);meta[current]=block?'':scalar(kv[2].trim());continue;}
-    if(current && /^\s+-\s+/.test(line) && !block){if(!Array.isArray(meta[current]))meta[current]=meta[current]?list(meta[current]):[];meta[current].push(scalar(line.replace(/^\s+-\s+/,'')));continue;}
+    if(kv){
+      current=kv[1];const raw=stripInlineComment(kv[2]);
+      block=/^[|>][+-]?$/.test(raw);
+      if(block){meta[current]='';continue;}
+      if(disallowedYaml(raw)){current=null;continue;}
+      meta[current]=raw.startsWith('[')&&raw.endsWith(']')?list(raw):scalar(raw);continue;
+    }
+    if(current && /^\s+-\s+/.test(line) && !block){
+      const item=stripInlineComment(line.replace(/^\s+-\s+/,''));
+      if(!item||disallowedYaml(item))continue;
+      if(!Array.isArray(meta[current]))meta[current]=meta[current]?list(meta[current]):[];
+      meta[current].push(scalar(item));continue;
+    }
     if(current && /^\s+\S/.test(line) && block){meta[current]+=(meta[current]?' ':'')+line.trim();}
   }
   return {meta,body};

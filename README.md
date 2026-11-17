@@ -64,8 +64,8 @@ An orchestrator may optionally pass `{ taskId, requiredSkills }` under `event.me
 
 | Tool | Purpose |
 |---|---|
-| `lazy_skill_search` | Multilingual skill search with `ids`, `summary`, or `full` detail |
-| `lazy_skill_info` | Inspect skill metadata, origin, and relative resource file paths |
+| `lazy_skill_search` | Multilingual skill search (string or term array) with `ids`, `summary`, or `full` detail |
+| `lazy_skill_info` | Inspect one (`id`) or multiple (`ids`) skills' metadata, origin, and relative resource paths |
 | `lazy_skill_plan` | Read-only binding preview matching `prompt` hook permission/scope rules |
 | `lazy_skill_status` | Catalog counts, active configuration, and last session binding receipt |
 | `lazy_skill_load` | Safely load one selected cold-vault skill body on demand |

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.3
+
+- Add camelCase/acronym boundary splitting in `tokenize()` and conservative Turkish/English suffix stemming in `variants()` with weighted stem alternatives in `search()`.
+- Broaden `isOrchestratedRoster()` to detect subagent rosters with restrictive `edit`, `shell`/`bash`, `subagent`/`task`, `question`, `*`, or `skill` permissions.
+- Strip markdown code fences in `parseSemanticIDs()`, preserve `model.variant` in semantic routing, and support `ctx.generate.text` fallback.
+- Detect `origin: "project"` for native skills present in `.opencode/skills` or `.opencode/skill` even when `ctx.skill.list()` omits `path`.
+- Skip automatic binding and hints on synthetic/internal prompts (`synthetic: true` / `internal: true`) unless explicit or required skills are present.
+- Strip YAML inline `#` comments and reject disallowed YAML tokens (`&`, `*`, `!`) in `parseFrontmatter()`, parsing inline `[...]` arrays directly.
+- Support array `query` in `lazy_skill_search`, batch `ids` in `lazy_skill_info`, and inject `<lazy_skill_catalog>` on-demand discovery guidance into `ctx.session.hook("context")` when `nativeCatalog: "hide"`.
+
 ## 1.4.2
 
 - Enforce host agent `skill` permissions (`respectHostPermissions`) via `ctx.session.get()` under `mode: "single"` and `autoBind: "off"` whenever `ctx.agent.list()` is available, failing closed on transient lookup failures.
