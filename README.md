@@ -1,18 +1,18 @@
 # opencode-lazy-skill-engine
 
-OpenCode V2 sunucu eklentisi. **Tek ajan** ve **çok ajanlı çalışma ortamları** için bağımsız, 13 dilde skill keşfi; native skill bağlama ve güvenli cold-vault erişimi sunar. Herhangi bir orkestratörün paketini, rol isimlerini, görev araçlarını, modelini veya belirli bir host yama sürümünü gerektirmez.
+An OpenCode V2 server plugin providing host-neutral, 13-language skill discovery, native skill binding, and safe cold-vault access for both **single-agent** and **multi-agent** workspaces. It does not require any external orchestrator package, fixed role names, custom task tools, specific model, or pinned host patch version.
 
-## Tasarım ilkeleri
+## Design Principles
 
-- **Host sahibi olmaya devam eder.** Başka bir eklentinin kayıtlı skill'leri, native `skill` aracı, ajan izinleri ve mevcut `prompt.skills` ekleri korunur.
-- **Yetkinlik temelli uyum.** Yalnızca `ctx.skill`, `ctx.session`, `ctx.agent` ve `ctx.tool` alanlarının mevcut sözleşmeleri kullanılır; başka eklentiye özgü API çağrılmaz.
-- **Minimum müdahale.** Varsayılan katalog davranışı `preserve`, ipucu enjeksiyonu `off`, ortak çalışmada `coexistence: respect` şeklindedir. Kataloğu gizleme ve tam içerik yükleme ayrıca seçilir.
-- **Yerel hızlı arama.** Sınırlı frontmatter taraması, ters indeks, BM25F benzeri puanlama, Unicode parçalama, çok dilli kavram eşleştirme ve bounded Top-K kullanılır. Arama için ağ, veritabanı veya embedding gerekmez.
-- **İzinlerin genişletilmemesi.** Uygun olduğunda hostun ajan izinleri `ctx.agent.list()` üzerinden okunur. Sıralı `skill` izinlerinde son eşleşme geçerlidir. Kullanıcı/başka eklenti tarafından bağlanmış skill'lere dokunulmaz.
+- **The host remains authoritative.** Native skills registered by other plugins, the built-in `skill` tool, agent permissions, and existing `prompt.skills` attachments are preserved.
+- **Capability-based adaptation.** Uses only standard `ctx.skill`, `ctx.session`, `ctx.agent`, and `ctx.tool` contracts; never calls another plugin's private APIs.
+- **Minimal intervention.** Defaults to `nativeCatalog: "preserve"`, `hints: "off"`, and `coexistence: "respect"`. Catalog compaction/hiding and full-body loading are explicit opt-ins.
+- **Fast local search.** Uses bounded frontmatter scanning, an inverted postings index, BM25F-style scoring, Unicode tokenization, a 13-language concept bridge, and bounded Top-K retrieval. No network, database, or external embeddings required.
+- **No privilege escalation.** When `ctx.agent.list()` is available, ordered host `skill` permissions filter automatic candidates. Last matching rule wins. Existing user or third-party `prompt.skills` attachments are never removed or overwritten.
 
-## Kurulum
+## Installation
 
-Paket klasörünü proje içindeki `./plugins/lazy-skills/` dizinine yerleştirin (içinde `package.json` ve `src/` bulunmalıdır). Ardından `opencode.jsonc` içinde:
+Place the package directory at `./plugins/lazy-skills/` in your project (containing `package.json` and `src/`), then configure `opencode.jsonc`:
 
 ```jsonc
 {
@@ -31,46 +31,53 @@ Paket klasörünü proje içindeki `./plugins/lazy-skills/` dizinine yerleştiri
 }
 ```
 
-Bu yalnızca örnektir: Options tamamen atlandığında aynı güvenli varsayılanlar uygulanır. Global kurulumda paket yolunu OpenCode global `opencode.jsonc` konumuna göre çözümleyin. SDK bağımlılığı çalıştıran OpenCode V2 ortamından çözülmelidir. `@opencode/plugin` için package manifestindeki **V2 ana sürüm aralığı** dışında sabit bir yama sürümü zorunlu tutulmaz. V2 API yeteneklerinin bulunmaması durumunda çalışma kancalarının her biri ayrıca değerlendirilir; gerçek host kabul testi gerekir.
+These options are illustrative: omitting `options` applies the same safe defaults. For global installation, resolve the package path relative to your global OpenCode `opencode.jsonc`. The `@opencode/plugin` peer dependency is resolved from the running OpenCode V2 host within the **V2 major version range** declared in `package.json`.
 
-## Çalışma biçimleri
+## Operating Modes
 
-| `mode` | Otomatik skill bağlama | Kullanım |
+| `mode` | Automatic skill binding | Intended use |
 |---|---|---|
-| `auto` (varsayılan) | Tek ajanda güven eşiğini geçen skill; host alt ajanı/rol kısıtlaması algılandığında yalnız worker | Bağımsız kurulumlar |
-| `single` | `autoBind: adaptive` ile tek ajan mantığı | Tek ajana zorlamak isteyenler |
-| `orchestrator` | `autoBind: adaptive` ile yalnız worker | Otomatik ayrım yerine açık mod isteyenler |
+| `auto` (default) | High-confidence native skills in single-agent mode; workers only when host subagent/role restrictions are detected | General setups |
+| `single` | Single-agent logic with `autoBind: adaptive` | Force single-agent behavior |
+| `orchestrator` | Workers only with `autoBind: adaptive` | Explicit multi-agent separation |
 
-`autoBind` seçenekleri: `adaptive` (varsayılan), `off`, `workers`, `all`. `coexistence: respect` varsayılan olarak `prompt.skills` zaten doluysa **yeni otomatik skill eklemez**. `requiredSkills` gibi açık görev sözleşmeleri ayrı değerlendirilir. `coexistence: augment` yalnızca iki bağlayıcıyı birlikte kullanmak bilinçli olarak istendiğinde seçilmelidir.
+`autoBind` options: `adaptive` (default), `off`, `workers`, `all`. With `coexistence: "respect"` (default), **no new automatic skills are added** when `prompt.skills` is already populated. Explicit `requiredSkills` task contracts are evaluated separately. Use `coexistence: "augment"` only when you intentionally want to combine two binders.
 
-`ctx.agent.list()` mevcutsa hostun sıralı izinleri otomatik adayları filtreler; açıkça `allow` olmayan skill otomatik bağlanmaz. Ajan listesi mevcut ama worker'ın politikası okunamıyorsa worker için otomatik seçim kapatılır. Hostun bu yeteneği hiç yoksa yalnızca eldeki açık rol/scope ayarlarıyla çalışılır; **ayrı bir çalışma zamanı izin onayı garanti edilmez**. Gerekirse `autoBind: off` kullanın. `respectHostPermissions: false` yalnızca uygulayıcının riskini kabul ettiği uyum durumları için sunulur.
+When `ctx.agent.list()` is available, the host's ordered permission rules filter automatic candidates; skills without an explicit `allow` decision are not auto-bound. If an agent roster exists but a worker's policy cannot be resolved (or `session.get` fails), automatic binding is disabled for safety. If the host does not expose `ctx.agent.list()`, the plugin operates only within its configured role/scope bounds and **cannot guarantee independent runtime permission enforcement**; set `autoBind: "off"` if needed. `respectHostPermissions: false` is provided strictly as an explicit recovery escape hatch.
 
-`nativeCatalog: preserve` başka eklentilerin `autoinvoke` kararını bozmaz. `hide` ve `compact` seçenekleri **yalnızca bilinçli tercih** ile etkindir; birlikte çalışan başka skill kaydediciler varsa özellikle test edilmelidir.
+`nativeCatalog: "preserve"` leaves other plugins' `autoinvoke` flags untouched. `hide` and `compact` are **explicit opt-ins** and should be tested alongside any other skill-registering plugins.
 
-## Skill bağlama sözleşmesi
+## Skill Binding Contract
 
-Seçim önceliği: mevcut host ekleri (değişmeden kalır); **görevin zorunlu skill'leri** (`metadata.lazySkill.requiredSkills`); metindeki **`skill:<id>`** açık seçimi; uygun rol adayları ve otomatik puanlama; isteğe bağlı semantik fallback. Zorunlu skill eksik veya host tarafından açıkça engellenmişse ekleme **atomik** olarak reddedilir. Otomatik seçim rolün `allowed` listesini, kaynak önceliklerini, olumsuz tetikleyicileri ve sınırları korur.
+Selection precedence:
+1. Existing host attachments in `prompt.skills` (preserved unchanged)
+2. Task-required skills (`metadata.lazySkill.requiredSkills`)
+3. Explicit inline selection (`skill:<id>`)
+4. Eligible role/single-agent candidates and lexical scoring
+5. Optional semantic fallback (`experimental.generate.text`)
 
-Orkestratör varsa `event.metadata.lazySkill` altında `{taskId, requiredSkills}` aktarabilir; **bu alan zorunlu değildir ve başka bir eklentinin API'si değildir**. Ajan izinlerini başka bir sistemden devralmaz; yalnızca hostun sağladığı kimlik/izin kayıtlarını yorumlar. Native skill'ler her zaman `prompt.skills` üzerinden eklenir; cold vault açıkça izin verilmedikçe otomatik yüklenmez.
+If a required skill is missing from the active catalog or denied by host agent permissions, the prompt fails **atomically** before mutating `prompt.skills` or `prompt.text`. Automatic selection respects role `allowed` lists, origin bonuses, `negativeTriggers`, and active caps.
 
-## Araçlar
+An orchestrator may optionally pass `{ taskId, requiredSkills }` under `event.metadata.lazySkill`; **this field is optional and not tied to any external plugin API**. Native skills are always attached via `event.prompt.skills`; cold-vault bodies are never auto-injected unless `vaultAutoBind: true` (and `projectAutoBind: true` for project-local vault skills) is explicitly enabled.
 
-| Araç | Görev |
+## Tools
+
+| Tool | Purpose |
 |---|---|
-| `lazy_skill_search` | Çok dilli, kısa/ayrıntılı skill araması |
-| `lazy_skill_info` | Skill açıklaması, kökeni ve referans dosya adları |
-| `lazy_skill_plan` | Seçimi içeriği yüklemeden önizleme |
-| `lazy_skill_status` | Katalog, aktif ayarlar ve son bağlama özeti |
-| `lazy_skill_load` | Cold-vault skill içeriğini güvenli biçimde yükleme |
-| `lazy_skill_resource` | Cold-vault referans metin dosyalarını sınırlı okuma |
+| `lazy_skill_search` | Multilingual skill search with `ids`, `summary`, or `full` detail |
+| `lazy_skill_info` | Inspect skill metadata, origin, and relative resource file paths |
+| `lazy_skill_plan` | Read-only binding preview matching `prompt` hook permission/scope rules |
+| `lazy_skill_status` | Catalog counts, active configuration, and last session binding receipt |
+| `lazy_skill_load` | Safely load one selected cold-vault skill body on demand |
+| `lazy_skill_resource` | Bounded UTF-8 text read of a relative resource file in a vault skill |
 
-İlk dört araç büyük skill gövdelerini yüklemez. Native skill'i yüklerken hostun kendi `skill` aracı kullanılır. Vault'dan okunan içerik güvenilmeyen veridir; sistem talimatlarını veya host izinlerini değiştiremez.
+The first four tools never load full skill bodies. Native skills must be loaded using the host's built-in `skill` tool. Content read from a vault is treated as untrusted data wrapped in escaped XML boundaries and cannot override system instructions or host permissions.
 
-## Dil desteği
+## Language Support
 
-Mandarin Çincesi (`zh`), İngilizce (`en`), Hintçe (`hi`), Almanca (`de`), Portekizce (`pt`), Japonca (`ja`), Endonezce (`id`), Rusça (`ru`), Fransızca (`fr`), İspanyolca (`es`), Vietnamca (`vi`), Hollandaca (`nl`) ve Türkçe (`tr`). Bu yapı tam çeviri motoru değildir; çok dilli mühendislik terimleri için yerel arama köprüsüdür.
+Supports 13 languages: Chinese (`zh`), English (`en`), Hindi (`hi`), German (`de`), Portuguese (`pt`), Japanese (`ja`), Indonesian (`id`), Russian (`ru`), French (`fr`), Spanish (`es`), Vietnamese (`vi`), Dutch (`nl`), and Turkish (`tr`). This is a finite, dependency-free local engineering concept bridge—not a machine translation engine.
 
-## Doğrulama
+## Verification
 
 ```sh
 npm test
@@ -79,4 +86,4 @@ npm run benchmark
 npm pack --dry-run
 ```
 
-Testler `node:test` ile taklit V2 host üzerinde çalışır; ayrıca `opencode v2.3.0 --standalone` yalıtılmış sandbox ortamında eklenti yükleme, `setup(ctx)` ve temiz kapanış doğrulanmıştır. **Gerçek OpenCode sunucusunda farklı eklenti yükleme sıralarıyla uçtan uca çok ajanlı tur testleri bu pakette çalıştırılmamıştır (`NOT_RUN`).** Ayrıntılar: [Ortak çalışma](docs/COEXISTENCE.md), [Kalite](docs/QUALITY.md), [Mimari](docs/ARCHITECTURE.md).
+Unit and integration tests run via `node:test` against a simulated V2 host. Additionally, plugin discovery, `setup(ctx)`, and clean shutdown were verified in an isolated `opencode v2.3.0 --standalone` sandbox. **Multi-plugin live turn-by-turn orchestration has not been executed (`NOT_RUN`).** See [Coexistence](docs/COEXISTENCE.md), [Quality](docs/QUALITY.md), and [Architecture](docs/ARCHITECTURE.md).

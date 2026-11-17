@@ -2,29 +2,28 @@
 
 ## 1.4.2
 
-- `mode: single` ve `autoBind: off` altında `ctx.agent.list()` mevcutken `session.get` üzerinden host izinlerinin (`respectHostPermissions`) tutarlı biçimde uygulanması ve geçici ağ/zaman aşımı hatalarında fail-closed davranışı.
-- `skill:<id>` açık bağlamasının `vaultAutoBind: false` veya `projectAutoBind: false` sınırlarını aşmasının engellenmesi; `lazy_skill_plan` aracının `prompt` kancası ile tam izin/kapsam paritesi.
-- CJK (Çince/Japonca) sorgularda kavram eşleşmesi varken alan terimlerinin korunması, CJK çok kelimeli `negativeTriggers` eşleşmesi, UTF-16 maske hizalaması ve tam eşleşme (`complete`) sonrası kalan `topK` yuvalarının kısmi (`partial`) sonuçlarla doldurulması.
-- `detectLanguage` içinde Türkçe `İ` harfi ve tekrar eden alt dizgi düzeltmesi; `parseQuery` ve `extractExplicit` için `maxPromptChars` uyumu; `triggers`/`tags` alanlarının tırnak içi ifade aramasına eklenmesi.
-- `options.roots` altındaki proje içi dizinlerin `origin: 'project'` olarak sınıflandırılması, `listResources` sembolik bağ/Windows yol ayracı düzeltmesi, `safeRead` `trustedRoot` kanonikleştirmesi ve `<skill>` / `<vault_resource>` / `<lazy_bound_skill>` XML sınır kaçış koruması.
-- `nativeCatalog: 'compact'` yeniden yüklemelerinde orijinal açıklamaların korunması, `Catalog.refresh(true)` yarış durumu düzeltmesi, `parseFrontmatter` UTF-8 BOM/boşluk desteği ve `SessionLedger` yükleme anahtarı hizalaması.
+- Enforce host agent `skill` permissions (`respectHostPermissions`) via `ctx.session.get()` under `mode: "single"` and `autoBind: "off"` whenever `ctx.agent.list()` is available, failing closed on transient lookup failures.
+- Prevent `skill:<id>` explicit binding from bypassing `vaultAutoBind: false` or `projectAutoBind: false`, and align `lazy_skill_plan` with `prompt` hook permission/scope filtering.
+- Preserve non-concept CJK (Chinese/Japanese) domain terms alongside matched concepts, add Japanese/Chinese polite request stopwords, align UTF-16 concept masks, support unspaced CJK multi-word `negativeTriggers`, and backfill remaining `topK` slots with partial matches after full-coverage hits.
+- Fix Turkish uppercase `İ` and repeated-substring handling in `detectLanguage()`, align `parseQuery` and `extractExplicit` with `maxPromptChars`, and include `triggers` and `tags` in quoted phrase scoring.
+- Classify custom `options.roots` inside the project directory as `origin: "project"`, fix `listResources()` canonical relative paths and Windows separators, canonicalize `trustedRoot` in `safeRead()`, and escape closing boundary tags in `<skill>`, `<vault_resource>`, and `<lazy_bound_skill>`.
+- Preserve original descriptions on reload under `nativeCatalog: "compact"`, fix `Catalog.refresh(true)` concurrency with inflight non-forced refreshes, support UTF-8 BOM and trailing spaces in `parseFrontmatter()`, and align `SessionLedger` load keys.
+- Translate all repository documentation into English.
 
 ## 1.4.1
 
-- Kod, yorum, testler, belgeler ve kurulum örneklerindeki özel dış proje veya ürün atıfları temizlendi.
-- Yalnız `opencode-lazy-skill-engine` ve resmi OpenCode arayüzü ürün adı olarak kullanılıyor.
-- Gerekli çalışma zamanı importları, test komutları, SDK paket tanımlayıcısı ve özgün lisans korundu.
-- Tek ajan, çok ajanlı çalışma, skill arama ve izin sözleşmelerinde işlevsel değişiklik yapılmadı.
+- Removed external project/product references from code, comments, tests, documentation, and installation examples.
+- Standardized naming on `opencode-lazy-skill-engine` and official OpenCode interfaces.
+- Preserved runtime imports, test commands, SDK package identifiers, and original license.
+- No functional changes to single-agent, multi-agent, search, or permission contracts.
 
 ## 1.4.0
 
-- Dış orkestratör kimliği ve sürüm numarası bağımlılığı olmadan host yetkinliği temelli ortak çalışma.
-- Varsayılan `nativeCatalog: preserve`, `hints: off`, `coexistence: respect`.
-- `ctx.agent.list()` izinlerine dayalı otomatik skill filtrelemesi; sıralı allow/ask/deny ve wildcard kuralları.
-- Mevcut `prompt.skills` ekleri başka bir sistemin sahipliğinde sayılır; otomatik ekleme varsayılan olarak durdurulur.
-- Host ajan listesi mevcut fakat alt ajan yetkisi doğrulanamıyorsa otomatik genişleme engellenir.
-- Ortak eklenti ortamındaki uzman skill kısıtlamalarından çok ajanlı modun sezilmesi.
-- Versiyon sabitlemeyen örnek kurulum yolu; diğer projelere bağımlı belgelerin paket yüzeyinden temizlenmesi.
-- Eski seçim, arama, dil, güvenlik ve vault özellikleri korunur.
+- Capability-based host coexistence without external orchestrator IDs or pinned version checks.
+- Safe defaults: `nativeCatalog: "preserve"`, `hints: "off"`, `coexistence: "respect"`.
+- Automatic skill filtering via `ctx.agent.list()` ordered allow/ask/deny and wildcard rules.
+- Preserve existing `prompt.skills` attachments owned by the host or other plugins; halt automatic additions by default.
+- Disable automatic worker expansion when a host agent roster exists but worker policy cannot be verified.
+- Infer multi-agent mode from generic subagent skill restrictions.
 
-Previous releases supplied the multilingual index, role-aware selection, native binding, cold vault, semantic fallback and standalone auto mode. See the tests for ongoing compatibility contracts.
+Previous releases supplied the multilingual index, role-aware selection, native binding, cold vault, semantic fallback, and standalone auto mode. See the test suite for ongoing compatibility contracts.

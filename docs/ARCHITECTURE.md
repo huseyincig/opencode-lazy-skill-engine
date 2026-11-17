@@ -1,13 +1,13 @@
-# Mimari
+# Architecture
 
-`src/core/` her orkestratörden bağımsız saf veya sınırlı I/O modülleridir. `src/plugin.js` OpenCode V2 adaptörüdür.
+`src/core/` contains pure or bounded-I/O modules independent of any orchestrator. `src/plugin.js` is the OpenCode V2 server adapter.
 
-- **Katalog**: native `ctx.skill.list()` ve opt-in yerel vault kökleri; native kayıt aynı ID'li vault'a önceliklidir. Proje dizini içindeki özel `roots` yolları da `project` kökenli sayılır. Bounded metadata ve atomik indeks yenileme kullanılır.
-- **Arama**: Unicode normalizasyonu, script-aware parçalama, 13 dilli kavramlar (CJK alan terimleri korunarak), ters indeks, ağırlıklı eşleşme ve tam eşleşme öncelikli sınırlı Top-K.
-- **Seçim**: zorunlu/açık seçim önceliği, otomatik aday allowlist'i, negatif tetikleyici (CJK boşluksuz ifadeler dahil), kaynak çarpanı ve coverage/eşik; `lazy_skill_plan` ile `prompt` kancası birebir hizalıdır.
-- **Host izinleri**: `src/core/host-policy.js` yalnız hostun ajan listesindeki sıralı skill kurallarını okur; wildcard eşleşmesi lineerdir. `mode: single` ve `autoBind: off` dahil olmak üzere host ajan listesi mevcutsa oturum kimliği okunur; geçici hatalarda fail-closed davranılır. Katalog listeleme TTL ile sınırlandırılır.
-- **Birlikte çalışma**: başkasına ait `prompt.skills` dizisi korunur; varsayılan mod yeni otomatik ek yapmaz. Katalog gizleme ve prompt mikro-ipuçları opt-in'dir.
-- **Bağlama**: Native skill'ler `event.prompt.skills` ile, vault içerikleri opt-in ve bounded dosya okumasıyla eklenir; XML sınır etiketleri kaçışlanır. Dosya ve role geçişleri farklı koruma katmanlarıdır.
-- **Semantik seçim**: kapalı varsayılan; native `experimental.generate.text` yeteneği varsa sınırlı adaylardan strict JSON ID dönüşü ve LRU sonuç önbelleği.
+- **Catalog**: Combines native `ctx.skill.list()` entries with opt-in local vault roots; native entries take precedence over same-ID vault entries. Custom `roots` inside the project directory are classified as `origin: "project"`. Uses bounded frontmatter reads and atomic index refreshes.
+- **Search**: Unicode normalization, script-aware tokenization, 13-language concept bridge (preserving CJK domain terms), inverted postings index, weighted BM25F-style scoring, and full-coverage-first bounded Top-K retrieval.
+- **Selection**: Enforces required/explicit binding precedence, automatic candidate allowlists, negative triggers (including unspaced CJK phrases), origin bonuses, and coverage/score thresholds; `lazy_skill_plan` mirrors `prompt` hook filtering.
+- **Host Permissions**: `src/core/host-policy.js` reads ordered `skill` permission rules from `ctx.agent.list()` using linear glob matching. Missing records never synthesize grants. Session identity is resolved even under `mode: "single"` or `autoBind: "off"` when `ctx.agent.list()` is present, failing closed on transient lookup failures. Roster lookups are TTL-cached.
+- **Coexistence**: Existing `prompt.skills` arrays are preserved; default mode (`coexistence: "respect"`) avoids automatic additions when attachments are already present. Catalog hiding/compaction and prompt hints are opt-in.
+- **Binding**: Native skills attach via `event.prompt.skills`; vault contents attach only on explicit opt-in via bounded file reads with XML closing-tag boundary escaping. File containment and role gating are independent defense layers.
+- **Semantic Selection**: Disabled by default; when enabled and host `experimental.generate.text` is available, performs strict JSON ID selection over bounded role-approved candidates with an LRU cache.
 
-Hiçbir orkestratörün isimli API'si, sürüm koşulu, sabit rol modeli, ağ erişimi, veritabanı veya komut yürütme motoru gerekmiyor. Tek kontrollü runtime bağımlılığı V2 host API sözleşmesidir.
+No external orchestrator API, fixed role catalog, network access, database, or command execution engine is required. The only runtime contract is the OpenCode V2 server plugin API.

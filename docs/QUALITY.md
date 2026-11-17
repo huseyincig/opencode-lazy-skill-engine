@@ -1,19 +1,19 @@
-# Kalite durumu
+# Quality & Verification Matrix
 
-Çalıştırma hedefi: OpenCode V2 Promise server plugin. Yerel doğrulama: standart `node:test` çalıştırıcısı, taklit host, bağımlılıksız çekirdek. Paket sürüm metadatası dışında sabit host yama sürümü bağımlılığı yoktur.
+Target runtime: OpenCode V2 Promise server plugin. Local verification uses `node:test` with a simulated V2 host and zero external runtime dependencies.
 
-| Test / kapı | Kanıt | Durum |
+| Gate / Check | Evidence | Status |
 |---|---|---|
-| 13 dilli arama | `tests/multilingual.test.js`, `tests/dual-mode.test.js` | Yerel test |
-| Native/Vault güvenlik | `tests/scanner-security.test.js`, `tests/plugin.test.js` | Yerel test |
-| Bağımsız tek ajan / çok ajan | `tests/dual-mode.test.js` | Taklit host |
-| Ortak çalışma, izinler, mevcut ekler | `tests/coexistence.test.js` | Taklit host |
-| Sıralama ve en iyi K sonuçları | `tests/text-rank.test.js`, `tests/robustness.test.js` | Yerel test |
-| Zorunlu/açık seçim, semantik fallback | `tests/selection-parity.test.js` | PASS (Yerel test) |
-| Güvenlik, CJK, izin ve yaşam döngüsü regresyonları | `tests/regression-audit.test.js` | PASS (Yerel test) |
-| Sözdizimi ve tüm birim testleri | `npm run check` | PASS (Yerel kontrol) |
-| Paket dosya yüzeyi | `npm pack --dry-run` | PASS (Yerel kontrol) |
-| Sandbox OpenCode V2 eklenti yükleme ve `setup(ctx)` | `opencode v2.3.0 --standalone debug agents` | PASS (Yalıtılmış sandbox) |
-| Birden fazla eklentiyle canlı yükleme sırası ve çok turlu oturum | Canlı çok eklentili oturum testi yapılmadı | **NOT_RUN** |
+| 13-language search & concepts | `tests/multilingual.test.js`, `tests/dual-mode.test.js` | PASS (Local) |
+| Native/Vault path & symlink security | `tests/scanner-security.test.js`, `tests/plugin.test.js` | PASS (Local) |
+| Standalone single-agent / multi-agent | `tests/dual-mode.test.js` | PASS (Simulated host) |
+| Coexistence, permissions, existing attachments | `tests/coexistence.test.js` | PASS (Simulated host) |
+| Ranking, fuzzing, bounded Top-K | `tests/text-rank.test.js`, `tests/robustness.test.js` | PASS (Local) |
+| Required/explicit binding & semantic fallback | `tests/selection-parity.test.js` | PASS (Local) |
+| Security, CJK, permission & lifecycle regressions | `tests/regression-audit.test.js` | PASS (Local) |
+| Syntax & full unit test suite | `npm run check` | PASS (Local) |
+| Package tarball surface | `npm pack --dry-run` | PASS (Local) |
+| Sandbox OpenCode V2 plugin load & `setup(ctx)` | `opencode v2.3.0 --standalone debug agents` | PASS (Isolated sandbox) |
+| Multi-plugin live load order & multi-turn sessions | Multi-plugin live host session | **NOT_RUN** |
 
-Statik sözleşme okuması ve taklit host geçişi gerçek host uygulamasının bütün yaşam döngüsünü kanıtlamaz. Paket/arşiv kontrollerinin sonuçları sürümün teslimi sırasında tazelenmelidir.
+Static contract inspection and simulated-host tests do not replace full multi-plugin live session verification.
