@@ -5,7 +5,7 @@ An OpenCode V2 server plugin providing host-neutral, 13-language skill discovery
 ## Design Principles
 
 - **The host remains authoritative.** Native skills registered by other plugins, the built-in `skill` tool, agent permissions, and existing `prompt.skills` attachments are preserved.
-- **Capability-based adaptation.** Uses only standard `ctx.skill`, `ctx.session`, `ctx.agent`, and `ctx.tool` contracts; never calls another plugin's private APIs.
+- **Capability-based adaptation.** Uses only standard `ctx.skill`, `ctx.session`, `ctx.agent`, `ctx.event`, and `ctx.tool` contracts; never calls another plugin's private APIs.
 - **Minimal intervention.** Defaults to `nativeCatalog: "preserve"`, `hints: "off"`, and `coexistence: "respect"`. Catalog compaction/hiding and full-body loading are explicit opt-ins.
 - **Fast local search.** Uses bounded frontmatter scanning, an inverted postings index, BM25F-style scoring, Unicode tokenization, a 13-language concept bridge, and bounded Top-K retrieval. No network, database, or external embeddings required.
 - **No privilege escalation.** When `ctx.agent.list()` is available, ordered host `skill` permissions filter automatic candidates. Last matching rule wins. Existing user or third-party `prompt.skills` attachments are never removed or overwritten.
@@ -45,7 +45,7 @@ These options are illustrative: omitting `options` applies the same safe default
 
 When `ctx.agent.list()` is available, the host's ordered permission rules filter automatic candidates; skills without an explicit `allow` decision are not auto-bound. If an agent roster exists but a worker's policy cannot be resolved (or `session.get` fails), automatic binding is disabled for safety. If the host does not expose `ctx.agent.list()`, the plugin operates only within its configured role/scope bounds and **cannot guarantee independent runtime permission enforcement**; set `autoBind: "off"` if needed. `respectHostPermissions: false` is provided strictly as an explicit recovery escape hatch.
 
-`nativeCatalog: "preserve"` leaves other plugins' `autoinvoke` flags untouched. `hide` and `compact` are **explicit opt-ins** and should be tested alongside any other skill-registering plugins; when `nativeCatalog: "hide"` is enabled, the plugin also registers `ctx.session.hook("context")` to inject a one-time `<lazy_skill_catalog>` on-demand discovery instruction into `event.system`. Synthetic/internal prompts (`synthetic: true` / `internal: true`) skip automatic binding and hints unless explicit `skill:<id>` or `requiredSkills` are present.
+`nativeCatalog: "preserve"` leaves other plugins' `autoinvoke` flags untouched. `hide` and `compact` are **explicit opt-ins** and should be tested alongside any other skill-registering plugins; when `nativeCatalog: "hide"` is enabled, the plugin also registers `ctx.session.hook("context")` to inject a one-time `<lazy_skill_catalog>` on-demand discovery instruction into `event.system`. The plugin subscribes to `skill.updated` and `agent.updated` events to invalidate cached catalogs/policies when other plugins register late. Synthetic/internal/auto-continue prompts (`synthetic: true`, `internal: true`, or `autoContinue: true` in top-level or plugin-namespaced metadata) skip automatic binding and hints unless explicit `skill:<id>` (with `bindExplicit: true`) or `requiredSkills` are present.
 
 ## Skill Binding Contract
 
@@ -86,4 +86,4 @@ npm run benchmark
 npm pack --dry-run
 ```
 
-Unit and integration tests (`157 / 157`) run via `node:test` against a simulated V2 host. Additionally, both source-directory and packed-tarball (`npm pack`) plugin discovery, `setup(ctx)`, and clean shutdown were verified in an isolated `opencode v2.3.0 --standalone` sandbox. **Multi-plugin live turn-by-turn orchestration has not been executed (`NOT_RUN`).** See [Coexistence](docs/COEXISTENCE.md), [Quality](docs/QUALITY.md), and [Architecture](docs/ARCHITECTURE.md).
+Unit and integration tests (`166 / 166`) run via `node:test` against a simulated V2 host. Additionally, packed-tarball (`npm pack`) installation, `opencode v2.3.2 --standalone` startup, `skill.list`, and `session.create` were verified in an isolated sandbox. **Multi-plugin live turn-by-turn orchestration has not been executed (`NOT_RUN`).** See [Coexistence](docs/COEXISTENCE.md), [Quality](docs/QUALITY.md), and [Architecture](docs/ARCHITECTURE.md).

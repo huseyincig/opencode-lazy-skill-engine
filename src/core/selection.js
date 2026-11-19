@@ -53,20 +53,32 @@ export function automaticCandidates({available=[],roleName,role,projectAutoBind=
 }
 
 export function selectBindings({available=[],promptText='',requiredSkills=[],roleName,role,autoBind='off',isWorker=false,
-  projectAutoBind=false,ranked=[],minScore=1.2,maxActive=DEFAULT_MAX,generic=false,vaultAutoBind=false,genericAllowed=[],hostAllowed=null,minCoverage=0,maxPromptChars=12000}={}){
+  projectAutoBind=false,ranked=[],minScore=1.2,maxActive=DEFAULT_MAX,generic=false,vaultAutoBind=false,genericAllowed=[],hostAllowed=null,minCoverage=0,maxPromptChars=12000,bindExplicit=true}={}){
   const byId=new Map(available.map(s=>[s.id,s]));
   const required=idList(requiredSkills), explicit=extractExplicit(promptText,maxPromptChars);
   const missingRequired=required.filter(id=>!byId.has(id));
   const missingExplicit=explicit.filter(id=>!byId.has(id));
   const existExplicit=explicit.filter(id=>byId.has(id));
+  const mode=BIND_MODES.has(autoBind)?autoBind:'off';
+  const autoPermitted=mode==='all'||(mode==='workers'&&isWorker);
   // Hard required invariant: fail atomically before any native skill attachment.
   if(missingRequired.length)return {ids:[],source:'task',missingRequired,missingExplicit,scores:[]};
-  if(required.length)return {ids:uniq([...required,...existExplicit]),source:'task',missingRequired,missingExplicit,scores:[]};
-  if(explicit.length)return {ids:existExplicit,source:existExplicit.length?'explicit':'none',missingRequired,missingExplicit,scores:[]};
-  const mode=BIND_MODES.has(autoBind)?autoBind:'off';
-  if(mode==='off'||(mode==='workers'&&!isWorker))return {ids:[],source:'none',missingRequired,missingExplicit,scores:[]};
+  if(required.length){
+    let extra=existExplicit;
+    if(!bindExplicit){
+      const candidates=autoPermitted?automaticCandidates({available,roleName,role,projectAutoBind,generic,vaultAutoBind,genericAllowed,hostAllowed}):new Set();
+      extra=existExplicit.filter(id=>candidates.has(id));
+    }
+    return {ids:uniq([...required,...extra]),source:'task',missingRequired,missingExplicit,scores:[]};
+  }
+  if(explicit.length&&bindExplicit)return {ids:existExplicit,source:existExplicit.length?'explicit':'none',missingRequired,missingExplicit,scores:[]};
+  if(!autoPermitted)return {ids:[],source:'none',missingRequired,missingExplicit,scores:[]};
   const candidateIds=automaticCandidates({available,roleName,role,projectAutoBind,generic,vaultAutoBind,genericAllowed,hostAllowed});
   if(candidateIds.size===0)return {ids:[],source:'none',missingRequired,missingExplicit,scores:[]};
+  if(explicit.length){
+    const allowedExplicit=existExplicit.filter(id=>candidateIds.has(id));
+    if(allowedExplicit.length)return {ids:allowedExplicit,source:'explicit',missingRequired,missingExplicit,scores:[]};
+  }
   const limit=Math.max(1,Math.min(8,Number.isInteger(role?.maxActive)?role.maxActive:maxActive));
   const scored=ranked.filter(h=>candidateIds.has(h.skill?.id)&&!negativeTriggerMatch(promptText,h.skill))
     .map(h=>({id:h.skill.id,raw:h.score,score:h.score*(ORIGIN_BONUS[h.skill.origin]??1),coverage:h.coverage??0,origin:h.skill.origin}));

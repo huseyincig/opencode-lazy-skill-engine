@@ -12,14 +12,15 @@ export function normalizeNative(result, opts) {
   const raw=Array.isArray(result) ? result : result?.skills ?? result?.items ?? result?.data ?? [];
   if(!Array.isArray(raw))throw new Error('Unexpected ctx.skill.list() response');
   const projectOpenCode=safeReal(join(opts.project,'.opencode'));
-  return raw.filter(s=>s && typeof s.id==='string' && !opts.exclude.has(s.id) && typeof s.description==='string').map(s=>{
-    // In V2 a native skill may already expose content; inspect only its bounded
-    // prefix, do not open another file or persist its potentially large body.
+  return raw.filter(s=>s && typeof s.id==='string' && !opts.exclude.has(s.id)).map(s=>{
+    // In V2 a native skill may already expose content and omit top-level description;
+    // inspect only its bounded prefix, do not open another file or persist its large body.
     const meta=typeof s.content==='string'?parseFrontmatter(s.content.slice(0,opts.maxFrontmatterBytes+16),opts.maxFrontmatterBytes).meta:{};
     const values=(key)=>Array.isArray(s[key])?s[key]:Array.isArray(meta[key])?meta[key]:typeof meta[key]==='string'&&meta[key]?[meta[key]]:[];
     const origin=(typeof s.path==='string' && inside(projectOpenCode,safeReal(s.path)))||hasProjectNative(projectOpenCode,s.id)?'project':'host';
+    const rawDescription=typeof s.description==='string'&&s.description.trim()?s.description:typeof meta.description==='string'&&meta.description.trim()?meta.description:typeof s.name==='string'&&s.name.trim()?s.name:'';
     return {
-      id:s.id,name:clipped(s.name??s.id,100),description:clipped(s.description,700),
+      id:s.id,name:clipped(s.name??s.id,100),description:clipped(rawDescription,700),
       keywords:[...new Set([...(opts.rules[s.id]||[]),...values('keywords')])].slice(0,64),
       aliases:[...new Set([...values('aliases'),...LANGUAGES.flatMap(lang=>[
         ...values(`keywords_${lang}`),...values(`keywords-${lang}`),...values(`name_${lang}`),...values(`description_${lang}`)
@@ -33,6 +34,7 @@ export function normalizeNative(result, opts) {
 }
 export class Catalog {
   constructor(ctx,opts) {this.ctx=ctx;this.opts=opts;this.index=createSearchIndex([],opts.weights);this.items=new Map();this.next=0;this.inflight=null;this.diagnostics=[];this.version=0;this.nativeReady=!opts.includeNative;this.metaCache=new Map();this.scanStats={metadataReads:0,metadataReuses:0};}
+  invalidate(){this.next=0;}
   async refresh(force=false) {
     const now=Date.now();
     if(!force && this.next>now)return this;

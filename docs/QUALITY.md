@@ -12,9 +12,10 @@ Target runtime: OpenCode V2 Promise server plugin. Local verification uses `node
 | Required/explicit binding & semantic fallback | `tests/selection-parity.test.js` | PASS (Local) |
 | Security, CJK, permission & lifecycle regressions | `tests/regression-audit.test.js` | PASS (Local) |
 | Host-neutral orchestration, stemming & YAML hardening | `tests/hi-lessons.test.js` | PASS (Local) |
-| Syntax & full unit test suite (157 tests / 10 files) | `npm run check` | PASS (Local) |
+| OpenCode V2.3.2 contract alignment, cache invalidation & validation | `tests/v232-audit.test.js` | PASS (Local) |
+| Syntax & full unit test suite (166 tests / 11 files) | `npm run check` | PASS (Local) |
 | Package tarball surface | `npm pack --dry-run` | PASS (Local) |
-| Sandbox OpenCode V2 source & packed-artifact load | `opencode v2.3.0 --standalone debug agents` + `debug config` | PASS (Isolated sandbox) |
+| Sandbox OpenCode V2 packed-artifact load | `opencode v2.3.2 --standalone api skill.list` + `session.create` | PASS (Isolated sandbox) |
 | Multi-plugin live load order & multi-turn sessions | Multi-plugin live host session | **NOT_RUN** |
 
 Static contract inspection and simulated-host tests do not replace full multi-plugin live session verification.

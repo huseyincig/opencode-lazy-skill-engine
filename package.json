@@ -1,6 +1,6 @@
 {
   "name": "opencode-lazy-skill-engine",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "private": true,
   "description": "Host-neutral, multilingual, cooperative lazy skill discovery and binding for OpenCode V2",
   "type": "module",

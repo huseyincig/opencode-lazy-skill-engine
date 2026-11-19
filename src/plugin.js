@@ -28,6 +28,10 @@ function agentAllowed(opts,context){
 function abortIfNeeded(context){if(context?.signal?.aborted)throw new Error('Skill request aborted');}
 const skillIds=value=>Array.isArray(value)?[...new Set(value.filter(x=>typeof x==='string'&&/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(x)&&x.length<=64))].slice(0,128):[];
 const readObj=v=>v&&typeof v==='object'&&!Array.isArray(v)?v:{};
+function isSyntheticMetadata(evMeta,prMeta){
+  if(evMeta.synthetic===true||prMeta.synthetic===true||evMeta.internal===true||prMeta.internal===true||evMeta.autoContinue===true||prMeta.autoContinue===true)return true;
+  return Object.values(evMeta).some(v=>v&&typeof v==='object'&&!Array.isArray(v)&&(v.synthetic===true||v.internal===true||v.autoContinue===true));
+}
 function requireSkillIds(value){
   if(value===undefined)return [];
   if(!Array.isArray(value)||value.length>128||value.some(x=>typeof x!=='string'||x.length>64||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(x)))
@@ -89,13 +93,28 @@ export function createPlugin() {
       const genDomain=typeof ctx.experimental?.generate?.text==='function'?ctx.experimental.generate:typeof ctx.generate?.text==='function'?ctx.generate:undefined;
       const semantic=new SemanticRouter(opts.semantic,genDomain?input=>genDomain.text(input):undefined);
       const registrations=[];
+      const eventAbort=new AbortController();
       let disposed=false;
       const cleanup=async()=>{
         if(disposed)return;
-        disposed=true;sessions.clear();semantic.clear();hostPolicy.clear();
+        disposed=true;eventAbort.abort();sessions.clear();semantic.clear();hostPolicy.clear();
         for(let i=registrations.length-1;i>=0;i--)try{await registrations[i]?.dispose?.();}catch{}
       };
       try{
+      if(typeof ctx.event?.subscribe==='function'){
+        const stream=ctx.event.subscribe({types:['skill.updated','agent.updated'],signal:eventAbort.signal});
+        if(stream&&typeof stream[Symbol.asyncIterator]==='function'){
+          (async()=>{
+            try{
+              for await(const ev of stream){
+                if(disposed)break;
+                if(ev?.type==='skill.updated')catalog.invalidate();
+                else if(ev?.type==='agent.updated')hostPolicy.clear();
+              }
+            }catch{}
+          })();
+        }
+      }
       // Initial catalog read is before optional metadata compaction, preserving rich search fields.
       await catalog.refresh(true);
       const originals=new Map([...catalog.items.values()].filter(s=>s.scope==='native').map(s=>[s.id,s.description]));
@@ -105,6 +124,7 @@ export function createPlugin() {
             // Transforms may replay after reload with skills that did not exist
             // at first setup. Do not leave new skills auto-invokable by default.
             if(!opts.includeNative || opts.exclude.has(native.id))continue;
+            if(!catalog.items.has(native.id))catalog.invalidate();
             if(opts.nativeCatalog==='compact'&&!originals.has(native.id)&&typeof native.description==='string'){
               originals.set(native.id,native.description);
             }
@@ -121,13 +141,19 @@ export function createPlugin() {
         editor.namespace({name:'lazy_skill',description:'Adaptive on-demand skill discovery and safe vault access. Native skills retain native permission checks.'});
         editor.add({
           name:'search', description:'Find useful native or vault skills using lexical, phrase, fuzzy and BM25-style ranking. Search BEFORE loading large skill bodies.',
-          input:objectInput({query:{anyOf:[str('What skill or workflow do you need? Use * to list.'),{type:'array',items:str('Search term'),maxItems:30}]},top_k:integer('Number of results (1-30)'),scope:{type:'string',enum:['native','vault'],description:'Optional source filter'},detail:{type:'string',enum:['ids','summary','full'],description:'Output size; default is summary'}},['query']),
+          input:objectInput({query:{anyOf:[str('What skill or workflow do you need? Use * to list.'),{type:'array',items:str('Search term'),minItems:1,maxItems:30}]},top_k:integer('Number of results (1-30)'),scope:{type:'string',enum:['native','vault'],description:'Optional source filter'},detail:{type:'string',enum:['ids','summary','full'],description:'Output size; default is summary'}},['query']),
           options:{namespace:'lazy_skill',codemode:false},
           execute:async(input,context)=>{
             abortIfNeeded(context);
-            const rawQuery=Array.isArray(input.query)?input.query.filter(x=>typeof x==='string').join(' '):input.query;
+            let rawQuery=input.query;
+            if(Array.isArray(input.query)){
+              if(!input.query.length||!input.query.every(x=>typeof x==='string'))throw new Error('Query array must contain at least one non-empty string');
+              rawQuery=input.query.join(' ');
+              if(!rawQuery.trim())throw new Error('Query array must contain at least one non-empty string');
+            }
             if(typeof rawQuery!=='string'||rawQuery.length>1000)throw new Error('Query must be text up to 1000 characters');
             const hits=await catalog.search(rawQuery,{topK:input.top_k??opts.maxResults,scope:input.scope});
+            abortIfNeeded(context);
             const detail=['ids','summary','full'].includes(input.detail)?input.detail:opts.searchDetail;
             const results=hits.map(({skill,score,coverage,matched})=>detail==='ids'
               ?{id:skill.id,scope:skill.scope,score}
@@ -139,21 +165,28 @@ export function createPlugin() {
         });
         editor.add({
           name:'info',description:'Inspect one or more skills’ metadata, origin and reference file list without loading their main SKILL.md.',
-          input:objectInput({id:str('Exact skill id'),ids:{type:'array',items:str('Exact skill id'),maxItems:20}},[]),options:{namespace:'lazy_skill',codemode:false},
+          input:objectInput({id:str('Exact skill id'),ids:{type:'array',items:str('Exact skill id'),minItems:1,maxItems:20}},[]),options:{namespace:'lazy_skill',codemode:false},
           execute:async(input,context)=>{
             abortIfNeeded(context);
-            if(Array.isArray(input.ids)){
+            if(input.ids!==undefined){
+              if(!Array.isArray(input.ids)||!input.ids.length)throw new Error('Provide id or a non-empty ids array');
               const list=[];
               for(const raw of input.ids.slice(0,20)){
+                abortIfNeeded(context);
                 const id=checkID(raw);const skill=await catalog.get(id);
+                abortIfNeeded(context);
                 if(!skill)list.push({id,error:'Skill not found'});
-                else list.push({...publicSkill(skill),resources:await listResources(skill),load:skill.scope==='native'?'Use built-in skill tool if permitted':'Use lazy_skill_load'});
+                else{const resources=await listResources(skill);abortIfNeeded(context);list.push({...publicSkill(skill),resources,load:skill.scope==='native'?'Use built-in skill tool if permitted':'Use lazy_skill_load'});}
               }
               return result({results:list});
             }
+            if(input.id===undefined)throw new Error('Provide id or a non-empty ids array');
             const id=checkID(input.id);const skill=await catalog.get(id);
+            abortIfNeeded(context);
             if(!skill)return result({error:'Skill not found'});
-            return result({...publicSkill(skill),resources:await listResources(skill),load:skill.scope==='native'?'Use built-in skill tool if permitted':'Use lazy_skill_load'});
+            const resources=await listResources(skill);
+            abortIfNeeded(context);
+            return result({...publicSkill(skill),resources,load:skill.scope==='native'?'Use built-in skill tool if permitted':'Use lazy_skill_load'});
           }
         });
         editor.add({
@@ -164,18 +197,21 @@ export function createPlugin() {
             abortIfNeeded(context);
             if(typeof input.query!=='string'||input.query.length>12000)throw new Error('Invalid task text');
             const available=[...(await catalog.refresh()).items.values()];
+            abortIfNeeded(context);
             const roleName=typeof input.agent==='string'?input.agent:undefined;
             const {roster,policy}=opts.respectHostPermissions ? await hostPolicy.forAgent(roleName) : {roster:null,policy:null};
+            abortIfNeeded(context);
             const hostAllowed=hostAllowedIds(opts,available,policy,input.worker===true,typeof ctx.agent?.list==='function');
             const routing=routeOptions(opts,available,roleName,input.worker===true,hostAllowed,isOrchestratedRoster(roster));
             const candidates=routing.automaticIds;
             const ranked=candidates.size?await catalog.search(input.query,{topK:30,allowedIds:candidates,respectNegativeTriggers:true}):[];
+            abortIfNeeded(context);
             const requiredList=requireSkillIds(input.requiredSkills);
             let plan=selectBindings({available,promptText:input.query,requiredSkills:requiredList,
               roleName,role:routing.role,autoBind:routing.autoBind,isWorker:routing.isWorker,
               projectAutoBind:opts.projectAutoBind,ranked,minScore:routing.minScore,maxActive:routing.maxActive,
               generic:routing.generic,genericAllowed:opts.singleAgent.allowed,vaultAutoBind:opts.vaultAutoBind,
-              minCoverage:routing.minCoverage,hostAllowed,maxPromptChars:opts.maxPromptChars});
+              minCoverage:routing.minCoverage,hostAllowed,maxPromptChars:opts.maxPromptChars,bindExplicit:opts.bindExplicit});
             if(policy&&hasSkillRules(policy)){
               const forbiddenRequired=requiredList.filter(id=>skillPermissionDecision(policy,id)!=='allow');
               if(forbiddenRequired.length)plan={...plan,ids:[],deniedRequired:forbiddenRequired};
@@ -185,13 +221,13 @@ export function createPlugin() {
               plan={...plan,ids:[],source:'none'};
             if(plan.source==='explicit')
               plan={...plan,ids:plan.ids.filter(id=>{const s=available.find(x=>x.id===id);return s&&(s.scope!=='vault'||(opts.vaultAutoBind&&(s.origin!=='project'||opts.projectAutoBind)));})};
-            return result({...plan,agent:roleName??null,mode:routing.mode,bindMode:routing.autoBind,vaultAutoBind:opts.vaultAutoBind,notes:'Preview only; native prompt.skills is authoritative and vault binding needs opt-in.'});
+            return result({...plan,agent:roleName??null,mode:routing.mode,bindMode:routing.autoBind,vaultAutoBind:opts.vaultAutoBind,semanticSkipped:opts.semantic.enabled,notes:'Preview only; native prompt.skills is authoritative and vault binding needs opt-in.'});
           }
         });
         editor.add({
           name:'status', description:'Inspect lazy skill engine catalog counts and bounded scan diagnostics. Does not read full skill contents.',
           input:objectInput({refresh:bool('Force a catalog refresh')},[]),options:{namespace:'lazy_skill',codemode:false},
-          execute:async(input,context)=>{abortIfNeeded(context);if(input.refresh)await catalog.refresh(true);return result({...await catalog.status(),hints:opts.hints,nativeCatalog:opts.nativeCatalog,autoBind:opts.autoBind,mode:opts.mode,singleAgent:opts.singleAgent,roles:Object.keys(opts.roles).length,projectAutoBind:opts.projectAutoBind,vaultAutoBind:opts.vaultAutoBind,semanticEnabled:opts.semantic.enabled,coexistence:opts.coexistence,respectHostPermissions:opts.respectHostPermissions,receipt:sessions.receipt(context?.sessionID),roots:opts.roots.length,language:opts.language,languages:LANGUAGES,concepts:CONCEPT_COUNT,index:'sparse-bm25f-interlingua'});}
+          execute:async(input,context)=>{abortIfNeeded(context);if(input.refresh)await catalog.refresh(true);const st=await catalog.status();abortIfNeeded(context);return result({...st,hints:opts.hints,nativeCatalog:opts.nativeCatalog,autoBind:opts.autoBind,mode:opts.mode,singleAgent:opts.singleAgent,roles:Object.keys(opts.roles).length,projectAutoBind:opts.projectAutoBind,vaultAutoBind:opts.vaultAutoBind,semanticEnabled:opts.semantic.enabled,coexistence:opts.coexistence,respectHostPermissions:opts.respectHostPermissions,receipt:sessions.receipt(context?.sessionID),roots:opts.roots.length,language:opts.language,languages:LANGUAGES,concepts:CONCEPT_COUNT,index:'sparse-bm25f-interlingua'});}
         });
         editor.add({
           name:'load',description:'Load the full body of one explicitly selected VAULT skill on demand. For NATIVE skills use built-in skill tool, not this tool. Never executes embedded commands.',
@@ -239,8 +275,8 @@ export function createPlugin() {
           if(typeof sessionID!=='string'||!sessionID)return;
           const evMeta=readObj(event.metadata);
           const prMeta=readObj(event?.prompt?.metadata);
-          const syntheticTurn=event?.synthetic===true||evMeta.synthetic===true||prMeta.synthetic===true||evMeta.internal===true||prMeta.internal===true;
-          if(syntheticTurn && !readObj(evMeta.lazySkill).requiredSkills?.length && !extractExplicit(sourceText,opts.maxPromptChars).length)return;
+          const syntheticTurn=event?.synthetic===true||isSyntheticMetadata(evMeta,prMeta);
+          if(syntheticTurn && !readObj(evMeta.lazySkill).requiredSkills?.length && !(opts.bindExplicit&&extractExplicit(sourceText,opts.maxPromptChars).length))return;
 
           let attached=false;
           if(needsBinding){
@@ -279,7 +315,7 @@ export function createPlugin() {
             let plan=selectBindings({available,promptText:sourceText,requiredSkills,roleName,role,autoBind:routing.autoBind,isWorker,
               projectAutoBind:opts.projectAutoBind,ranked,minScore:routing.minScore,maxActive:routing.maxActive,
               generic:routing.generic,genericAllowed:routing.genericAllowed,vaultAutoBind:opts.vaultAutoBind,
-              minCoverage:routing.minCoverage,hostAllowed,maxPromptChars:opts.maxPromptChars});
+              minCoverage:routing.minCoverage,hostAllowed,maxPromptChars:opts.maxPromptChars,bindExplicit:opts.bindExplicit});
             if(plan.missingRequired.length)throw new Error('Required skill is missing from active catalog: '+plan.missingRequired.join(', '));
             if(isWorker&&opts.respectHostPermissions&&hasNativeRosterAPI&&!policy&&requiredSkills.length)
               throw new Error('Required skill permissions unavailable for worker session');

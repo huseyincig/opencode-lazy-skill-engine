@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.5
+
+- Subscribe to `skill.updated` and `agent.updated` via `ctx.event.subscribe` and invalidate the catalog cache on `ctx.skill.transform` replay to eliminate the 30s stale-cache startup race with late-loading plugins.
+- Support optional `Skill.Info.description` in `normalizeNative()` by falling back to frontmatter `meta.description` or `s.name` instead of silently dropping native skills.
+- Pass `bindExplicit` into `selectBindings()` so `bindExplicit: false` prevents inline `skill:<id>` mentions from bypassing `autoBind` mode or `role.allowed` / `singleAgent.allowed` allowlists.
+- Scan vault roots in highest-priority-first order inside `scanVaults()` so a large global vault reaching `maxSkills` cannot starve project skills.
+- Tighten `lazy_skill_search` (reject empty/whitespace-only array queries) and `lazy_skill_info` (require `id` or non-empty `ids`), check `abortIfNeeded(context)` after async steps in tool handlers, expose `semanticSkipped` in `lazy_skill_plan`, and detect nested plugin `synthetic`/`internal`/`autoContinue` flags in `prompt` hook metadata.
+- Verify `166 / 166` unit/integration tests (`tests/v232-audit.test.js`) and packed-artifact (`npm pack`) loading inside an isolated `opencode v2.3.2 --standalone` sandbox.
+
 ## 1.4.4
 
 - Verify packed-artifact (`npm pack`) installation and loading inside an isolated `opencode v2.3.0 --standalone` sandbox (`debug agents` and `debug config`).

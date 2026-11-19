@@ -97,7 +97,9 @@ export async function scanVaults(opts,cache=new Map(),force=false) {
   const found=new Map();const diagnostics=[];
   let metadataReads=0,metadataReuses=0;
   const visitedPaths=new Set();
-  for(let r=0;r<opts.roots.length;r++) {
+  // Scan highest-priority roots (project/custom) before global so a large global
+  // vault cannot starve project skills when approaching maxSkills.
+  for(let r=opts.roots.length-1;r>=0;r--) {
     const root=opts.roots[r];
     let realRoot;
     try {realRoot=await realpath(root);} catch(e) {if(e?.code!=='ENOENT')diagnostics.push({root,error:e.code||'READ_FAILED'});continue;}
@@ -133,7 +135,7 @@ export async function scanVaults(opts,cache=new Map(),force=false) {
           }
           visitedPaths.add(rp);
           const skill=normalizeEntry(meta,rp,realRoot,r,opts);
-          if(skill)found.set(skill.id,skill); // Later roots (project) shadow earlier global roots.
+          if(skill && !found.has(skill.id))found.set(skill.id,skill); // Higher-priority roots (scanned first) win.
         } catch(e){diagnostics.push({root,error:e.code||'FILE_FAILED'});}
       }
     }
