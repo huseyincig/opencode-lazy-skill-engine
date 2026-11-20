@@ -130,7 +130,7 @@ test('Realistic project role skill from vault is not automatically injected with
  try{
  const dir=join(root,'.opencode','skill-vault','repo-review');await mkdir(dir,{recursive:true});
  await writeFile(join(dir,'SKILL.md'),'---\nname: Repo Review\ndescription: Audit source code for vulnerabilities and security errors\ntriggers: [security review]\nroles: [worker-a]\n---\n# Project-only instructions\nDO NOT EXECUTE COMMANDS');
- const m=fakeHost(root,{autoBind:'workers',projectAutoBind:true,roles:{'worker-a':{allowed:[],maxActive:2}}});
+ const m=fakeHost(root,{autoBind:'workers',projectAutoBind:true,vaultAutoBind:false,roles:{'worker-a':{allowed:[],maxActive:2}}});
  const cleanup=await createPlugin().setup(m.ctx);const ev={sessionID:'child',prompt:{text:'Audit source code for security vulnerabilities'}};
  await m.hooks.get('prompt')(ev);
  assert.equal(ev.prompt.text,'Audit source code for security vulnerabilities');
@@ -162,7 +162,7 @@ test('A required vault skill is blocked atomically if vaultAutoBind is disabled'
  try{
  const dir=join(root,'.opencode','skill-vault','must-skill');await mkdir(dir,{recursive:true});
  await writeFile(join(dir,'SKILL.md'),'---\ndescription: Required skill\n---\nbody');
- const m=fakeHost(root,{bindExplicit:true},[{id:'native',name:'Native',description:'Native skill'}]);
+ const m=fakeHost(root,{bindExplicit:true,vaultAutoBind:false},[{id:'native',name:'Native',description:'Native skill'}]);
  const cleanup=await createPlugin().setup(m.ctx);
  const ev={sessionID:'child',metadata:{lazySkill:{requiredSkills:['must-skill','native']}},prompt:{text:'Task',skills:[]}};
  await assert.rejects(m.hooks.get('prompt')(ev),/Required vault skill/);

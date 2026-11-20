@@ -313,14 +313,19 @@ All options are optional and safe out of the box. Pass them inline in `opencode.
 | `coexistence` | `"respect"` | `"respect"` (skip automatic binding if `prompt.skills` is non-empty) or `"augment"`. |
 | `respectHostPermissions` | `true` | Filter automatic candidates by `ctx.agent.list()` ordered `skill` permission rules. |
 | `nativeCatalog` | `"preserve"` | `"preserve"`, `"hide"` (sets `autoinvoke: false` + context guidance), or `"compact"`. |
-| `hints` | `"off"` | `"off"` or `"hint"` (appends bounded `<lazy_skill_suggestions>` when no skill is bound). |
+| `hints` | `"hint"` | `"hint"` (appends bounded `<lazy_skill_suggestions>` when no skill is bound) or `"off"`. |
 | `bindExplicit` | `true` | Honor inline `skill:<id>` mentions in prompt text. |
-| `vaultAutoBind` | `false` | Allow automatic or explicit prompt injection of cold-vault skill bodies. |
-| `projectAutoBind` | `false` | Allow project-local vault skills to be auto-bound when `vaultAutoBind: true`. |
+| `vaultAutoBind` | `true` | Allow automatic or explicit prompt injection of global cold-vault skill bodies (`~/.config/opencode/skill-vault`). |
+| `projectAutoBind` | `false` | Allow project-local vault skills (`.opencode/skill-vault`) to be auto-bound when `vaultAutoBind: true`. |
+| `singleAgent.minScore` | `2.5` | Minimum BM25F score for single-agent automatic binding (`0..100`). |
+| `singleAgent.minCoverage` | `0.3` | Minimum query term coverage for single-agent automatic binding (`0..1`). |
+| `singleAgent.maxActive` | `2` | Maximum skills auto-bound per turn in single-agent mode (`1..8`). |
+| `maxAutoSkills` | `4` | Maximum skills auto-bound per turn in role/orchestrator mode (`1..8`). |
+| `minAutoScore` | `1.2` | Minimum BM25F score for role-scoped automatic binding (`0..100`). |
 | `includeNative` | `true` | Index native skills from `ctx.skill.list()`. |
 | `roots` | `[global, project]` | Vault directories scanned for `SKILL.md` and root `.md` skills. |
-| `maxResults` | `5` | Default Top-K search results (`1..20`). |
-| `maxSkills` | `2000` | Maximum unique vault skills indexed (`1..20000`). |
+| `maxResults` | `8` | Default Top-K search results (`1..30`). |
+| `maxSkills` | `3000` | Maximum unique vault skills indexed (`1..20000`). |
 | `refreshMs` | `30000` | Catalog metadata cache TTL in milliseconds (also invalidated on `skill.updated`). |
 | `semantic.enabled` | `false` | Enable bounded LLM fallback routing over role-allowed candidates. |
 

@@ -320,3 +320,16 @@ test('Stats RPC snapshot returns string pkgVersion matching LAZY_SKILL_STATS_RPC
     assert.notEqual(snap[key], undefined, `missing required field ${key}`);
   }
 });
+
+test('Out-of-the-box defaults balance activation on relevant prompts without over-triggering', async () => {
+  const { configure } = await import('../dist/core/config.js');
+  const opts = configure({}, {});
+  assert.equal(opts.maxAutoSkills, 4);
+  assert.equal(opts.vaultAutoBind, true);
+  assert.equal(opts.projectAutoBind, false);
+  assert.equal(opts.bindExplicit, true);
+  assert.equal(opts.hints, 'hint');
+  assert.equal(opts.singleAgent.minScore, 2.5);
+  assert.equal(opts.singleAgent.minCoverage, 0.3);
+  assert.equal(opts.singleAgent.maxActive, 2);
+});

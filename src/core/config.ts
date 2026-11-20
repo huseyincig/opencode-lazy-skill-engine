@@ -107,7 +107,7 @@ export function configure(options: unknown = {}, location: unknown = {}): LazySk
     vaultRoots.push(isAbsolute(expanded) ? resolve(expanded) : resolve(project, expanded));
   }
 
-  const hints = options.hints === "hint" ? "hint" : "off";
+  const hints = options.hints === "off" ? "off" : "hint";
   const nativeCatalog =
     options.nativeCatalog === "compact" || options.nativeCatalog === "hide" ? options.nativeCatalog : "preserve";
   const weightKeys: FieldWeightKey[] = ["id", "name", "keywords", "aliases", "tags", "triggers", "description"];
@@ -155,25 +155,25 @@ export function configure(options: unknown = {}, location: unknown = {}): LazySk
     mode: options.mode === "single" || options.mode === "orchestrator" ? options.mode : "auto",
     singleAgent: Object.freeze({
       allowed: cleanIds(single.allowed),
-      maxActive: clampInt(single.maxActive, 1, 1, 8),
+      maxActive: clampInt(single.maxActive, 2, 1, 8),
       minScore:
         typeof single.minScore === "number" && Number.isFinite(single.minScore)
           ? Math.max(0, Math.min(100, single.minScore))
-          : 5,
+          : 2.5,
       minCoverage:
         typeof single.minCoverage === "number" && Number.isFinite(single.minCoverage)
           ? Math.max(0, Math.min(1, single.minCoverage))
-          : 0.55,
+          : 0.3,
     }),
     roles: roleOptions(options.roles),
     projectAutoBind: options.projectAutoBind === true,
-    vaultAutoBind: options.vaultAutoBind === true,
-    bindExplicit: options.bindExplicit === true,
+    vaultAutoBind: options.vaultAutoBind !== false,
+    bindExplicit: options.bindExplicit !== false,
     minAutoScore:
       typeof options.minAutoScore === "number" && Number.isFinite(options.minAutoScore)
         ? Math.max(0, Math.min(100, options.minAutoScore))
         : 1.2,
-    maxAutoSkills: clampInt(options.maxAutoSkills, 3, 1, 8),
+    maxAutoSkills: clampInt(options.maxAutoSkills, 4, 1, 8),
     semantic: Object.freeze({
       enabled: sem.enabled === true,
       model: typeof sem.model === "string" ? sem.model.slice(0, 160) : "",
