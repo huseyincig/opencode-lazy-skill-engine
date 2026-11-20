@@ -69,8 +69,10 @@ function termsFor(raw,words,concepts){
   const source=fold(raw),matched=matchConcepts(source),mask=source.split('');
   // Remove the exact lexical span already represented by an interlingual concept.
   // Example: Vietnamese "đánh giá" and Chinese "安全" each count as ONE intent unit.
-  for(const {start,end} of matched.values()){
-    for(let i=start;i<end;i++)mask[i]=' ';
+  for(const entry of matched.values()){
+    for(const {start,end} of (entry.spans??[entry])){
+      for(let i=start;i<end;i++)mask[i]=' ';
+    }
   }
   const residual=tokenize(mask.join(''));
   for(const term of residual){
@@ -96,8 +98,9 @@ function sumDocTerm(index,doc,term){
 /** Compact retrieval with negative filters, native/vault scoping, phrase/ID boosts and honest coverage. */
 export function search(index,query,options={}){
   const parsed=parseQuery(query),topK=Math.min(30,Math.max(1,Number.isInteger(options.topK)?options.topK:8));
+  const allowed=options.allowedIds instanceof Set?options.allowedIds:Array.isArray(options.allowedIds)?new Set(options.allowedIds):null;
   const listAll=(query.trim()===''||query.trim()==='*');
-  if(listAll)return index.docs.filter(d=>(!options.scope||d.skill.scope===options.scope)&&(!options.allowedIds||options.allowedIds.has(d.skill.id))).slice(0,topK).map(d=>({skill:d.skill,score:0,coverage:0,matched:[]}));
+  if(listAll)return index.docs.filter(d=>(!options.scope||d.skill.scope===options.scope)&&(!allowed||allowed.has(d.skill.id))).slice(0,topK).map(d=>({skill:d.skill,score:0,coverage:0,matched:[]}));
   const normalizedQuery=fold(query.trim());
   const pos=termsFor(parsed.positiveRaw,parsed.positive,parsed.positiveConcepts);
   const neg=termsFor(parsed.negativeRaw,parsed.negative,parsed.negativeConcepts);
@@ -127,9 +130,9 @@ export function search(index,query,options={}){
   };
   for(const id of ids){
     const d=index.docs[id];if(options.scope&&d.skill.scope!==options.scope)continue;
-    if(options.allowedIds && !options.allowedIds.has(d.skill.id))continue;
+    if(allowed && !allowed.has(d.skill.id))continue;
     if(options.respectNegativeTriggers && negativeTriggerMatch(query,d.skill))continue;
-    if(neg.some(term=>d.strengths.has(term)))continue;
+    if(neg.some(term=>d.strengths.has(term)||(!term.startsWith(C)&&variants(term).some(v=>d.strengths.has(v)))))continue;
     let value=0,hits=0,names=0;const matched=[];
     for(const term of pos){
       let best={score:0,name:false};

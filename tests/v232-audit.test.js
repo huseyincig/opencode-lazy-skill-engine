@@ -287,7 +287,7 @@ test('Finding 9: prompt hook detects nested plugin synthetic/autoContinue metada
   const event = {
     sessionID: 's1',
     prompt: { text: 'Security audit review code', skills: [] },
-    metadata: { 'opencode-smart-questions': { autoContinue: true } },
+    metadata: { 'peer-plugin': { autoContinue: true } },
   };
   await host.hooks.get('prompt')(event);
   assert.deepEqual(event.prompt.skills, []);

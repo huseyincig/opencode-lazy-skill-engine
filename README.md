@@ -86,4 +86,4 @@ npm run benchmark
 npm pack --dry-run
 ```
 
-Unit and integration tests (`166 / 166`) run via `node:test` against a simulated V2 host. Additionally, packed-tarball (`npm pack`) installation, `opencode v2.3.2 --standalone` startup, `skill.list`, and `session.create` were verified in an isolated sandbox. **Multi-plugin live turn-by-turn orchestration has not been executed (`NOT_RUN`).** See [Coexistence](docs/COEXISTENCE.md), [Quality](docs/QUALITY.md), and [Architecture](docs/ARCHITECTURE.md).
+Unit and integration tests (`175 / 175`) run via `node:test` against a simulated V2 host, including Universal Plugin Mesh interoperability (`src/bridge.js`). Additionally, packed-tarball (`npm pack`) installation, `opencode v2.3.2 --standalone` startup, `skill.list`, and `session.create` were verified in an isolated sandbox. **Multi-plugin live turn-by-turn orchestration has not been executed (`NOT_RUN`).** See [Coexistence](docs/COEXISTENCE.md), [Quality](docs/QUALITY.md), and [Architecture](docs/ARCHITECTURE.md).

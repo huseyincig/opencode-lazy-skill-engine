@@ -36,6 +36,8 @@ export function parseFrontmatter(data, maxFrontmatterBytes=8192) {
   const src=typeof data==='string'&&data.charCodeAt(0)===0xFEFF?data.slice(1):data;
   const open=/^---[ \t]*\r?\n/.exec(src);
   if(!open)return {meta:{},body:src};
+  const immediate=/^(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(src.slice(open[0].length));
+  if(immediate)return {meta:{},body:src.slice(open[0].length+immediate[0].length)};
   const marker=/\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/g;
   marker.lastIndex=open[0].length;
   const match=marker.exec(src);
@@ -58,7 +60,10 @@ export function parseFrontmatter(data, maxFrontmatterBytes=8192) {
       if(!Array.isArray(meta[current]))meta[current]=meta[current]?list(meta[current]):[];
       meta[current].push(scalar(item));continue;
     }
-    if(current && /^\s+\S/.test(line) && block){meta[current]+=(meta[current]?' ':'')+line.trim();}
+    if(current && /^\s+\S/.test(line)){
+      if(block){meta[current]+=(meta[current]?' ':'')+line.trim();}
+      else if(typeof meta[current]==='string'){meta[current]+=(meta[current]?' ':'')+scalar(line.trim());}
+    }
   }
   return {meta,body};
 }

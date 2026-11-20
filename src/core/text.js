@@ -96,8 +96,14 @@ export function variants(term) {
     }
   }
   if(word.endsWith('ies')&&word.length-2>=3){const s=`${word.slice(0,-3)}y`;if(!out.includes(s))out.push(s);}
-  else if(word.endsWith('ing')&&word.length-3>=3){const s=word.slice(0,-3);if(!out.includes(s))out.push(s);}
-  else if(word.endsWith('ed')&&word.length-2>=3){const s=word.slice(0,-2);if(!out.includes(s))out.push(s);}
+  else if(word.endsWith('ing')&&word.length-3>=3){
+    const s=word.slice(0,-3);if(!out.includes(s))out.push(s);
+    if(s.length>=4&&/([bcdfghjklmnpqrstvwxz])\1$/.test(s)){const single=s.slice(0,-1);if(single.length>=3&&!out.includes(single))out.push(single);}
+  }
+  else if(word.endsWith('ed')&&word.length-2>=3){
+    const s=word.slice(0,-2);if(!out.includes(s))out.push(s);
+    if(s.length>=4&&/([bcdfghjklmnpqrstvwxz])\1$/.test(s)){const single=s.slice(0,-1);if(single.length>=3&&!out.includes(single))out.push(single);}
+  }
   else if(word.endsWith('es')&&word.length-2>=3){const s=word.slice(0,-2);if(!out.includes(s))out.push(s);}
   else if(word.endsWith('s')&&!word.endsWith('ss')&&word.length-1>=3){const s=word.slice(0,-1);if(!out.includes(s))out.push(s);}
   return out;

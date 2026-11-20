@@ -17,5 +17,6 @@ export class SessionLedger {
   receipt(id){return this.state(id,false)?.receipt??null;}
   getTaskSelection(id,task){return this.state(id,false)?.semanticTasks.get(task);}
   setTaskSelection(id,task,selection){const state=this.state(id);if(!state)return;if(state.semanticTasks.size>=64)state.semanticTasks.delete(state.semanticTasks.keys().next().value);state.semanticTasks.set(task,[...selection]);}
+  delete(id){if(typeof id==='string'&&id)this.states.delete(id);}
   clear(){this.states.clear();}
 }

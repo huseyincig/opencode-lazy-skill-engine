@@ -83,7 +83,14 @@ export function matchConcepts(text) {
       const start=end-m.alias.length;
       if(!m.asian && (letterAt(s,start-1)||letterAt(s,end)))continue;
       const previous=matches.get(m.id);
-      if(!previous||m.alias.length>previous.alias.length) matches.set(m.id,{...m,start,end});
+      if(!previous){
+        matches.set(m.id,{...m,start,end,spans:[{start,end}]});
+      }else{
+        previous.spans.push({start,end});
+        if(m.alias.length>previous.alias.length){
+          previous.alias=m.alias;previous.lang=m.lang;previous.asian=m.asian;previous.start=start;previous.end=end;
+        }
+      }
     }
     at=end;
   }
