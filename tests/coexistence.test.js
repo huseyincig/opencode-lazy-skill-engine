@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { configure } from '../src/core/config.js';
-import { createPlugin } from '../src/plugin.js';
-import { globMatch, skillPermissionDecision } from '../src/core/host-policy.js';
+import { configure } from '../dist/core/config.js';
+import { createPlugin } from '../dist/plugin.js';
+import { globMatch, skillPermissionDecision } from '../dist/core/host-policy.js';
 
 const skills = [
  {id:'api-review',name:'API Review',description:'Review API authentication security vulnerabilities',autoinvoke:true},

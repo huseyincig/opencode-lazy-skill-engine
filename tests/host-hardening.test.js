@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createPlugin } from '../src/plugin.js';
-import { tokenize, variants } from '../src/core/text.js';
-import { createSearchIndex, search } from '../src/core/rank.js';
-import { isOrchestratedRoster } from '../src/core/host-policy.js';
-import { parseSemanticIDs } from '../src/core/semantic.js';
-import { normalizeNative } from '../src/core/catalog.js';
-import { parseFrontmatter } from '../src/core/scanner.js';
-import { configure } from '../src/core/config.js';
+import { createPlugin } from '../dist/plugin.js';
+import { tokenize, variants } from '../dist/core/text.js';
+import { createSearchIndex, search } from '../dist/core/rank.js';
+import { isOrchestratedRoster } from '../dist/core/host-policy.js';
+import { parseSemanticIDs } from '../dist/core/semantic.js';
+import { normalizeNative } from '../dist/core/catalog.js';
+import { parseFrontmatter } from '../dist/core/scanner.js';
+import { configure } from '../dist/core/config.js';
 
 function makeHost(root, options = {}, native = [], agents = null) {
   const tools = new Map(), hooks = new Map(), sessions = new Map();

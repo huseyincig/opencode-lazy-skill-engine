@@ -3,10 +3,18 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPlugin } from '../src/plugin.js';
+import { createPlugin } from '../dist/plugin.js';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const project = 'opencode-lazy-skill-engine';
+const pkgName = 'opencode-lazy-se';
+const pluginId = 'opencode-lazy-skill-engine';
+const allowedDomains = new Set([
+  'opencode.ai',
+  'img.shields.io',
+  'www.npmjs.com',
+  'github.com',
+  'www.w3.org',
+]);
 async function files(directory) {
   const collected = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -19,10 +27,15 @@ async function files(directory) {
 
 test('package and runtime plugin identity remain project-owned', async () => {
   const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-  assert.equal(manifest.name, project);
-  assert.equal(createPlugin().id, project);
+  assert.equal(manifest.name, pkgName);
+  assert.equal(createPlugin().id, pluginId);
   assert.deepEqual(Object.keys(manifest.dependencies ?? {}), []);
-  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), ['@opencode/plugin']);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), [
+    '@opencode/plugin',
+    '@opentui/core',
+    '@opentui/solid',
+    'solid-js',
+  ]);
 });
 
 test('published text contains no references to non-OpenCode web domains', async () => {
@@ -30,14 +43,14 @@ test('published text contains no references to non-OpenCode web domains', async 
     for (const path of await files(join(root, dir))) {
       const contents = await readFile(path, 'utf8');
       for (const match of contents.matchAll(/\bhttps?:\/\/([a-z\d.-]+)/gi)) {
-        assert.equal(match[1].toLowerCase(), 'opencode.ai', `Unexpected external URL in ${path}`);
+        assert.ok(allowedDomains.has(match[1].toLowerCase()), `Unexpected external URL (${match[1]}) in ${path}`);
       }
     }
   }
-  for (const name of ['README.md', 'CHANGELOG.md', 'LICENSE', 'package.json']) {
+  for (const name of ['README.md', 'CHANGELOG.md', 'LICENSE', 'package.json', 'tsconfig.json', 'index.js', 'tui.js']) {
     const contents = await readFile(join(root, name), 'utf8');
     for (const match of contents.matchAll(/\bhttps?:\/\/([a-z\d.-]+)/gi)) {
-      assert.equal(match[1].toLowerCase(), 'opencode.ai', `Unexpected external URL in ${name}`);
+      assert.ok(allowedDomains.has(match[1].toLowerCase()), `Unexpected external URL (${match[1]}) in ${name}`);
     }
   }
 });

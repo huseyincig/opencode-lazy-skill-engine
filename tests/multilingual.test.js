@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {LANGUAGES, CONCEPT_COUNT, fold, matchConcepts, HINT_I18N} from '../src/core/concepts.js';
-import {createSearchIndex,search} from '../src/core/rank.js';
-import {detectLanguage,tokenize,parseQuery} from '../src/core/text.js';
+import {LANGUAGES, CONCEPT_COUNT, fold, matchConcepts, HINT_I18N} from '../dist/core/concepts.js';
+import {createSearchIndex,search} from '../dist/core/rank.js';
+import {detectLanguage,tokenize,parseQuery} from '../dist/core/text.js';
 const records=[
  {id:'secure-code-review',name:'Secure Code Review',description:'Review code security and vulnerabilities in repositories',keywords:['security audit','code review','threat modeling'],tags:['quality'],scope:'vault'},
  {id:'database-migration',name:'Database Migration',description:'Move schemas and data between databases',keywords:['sql database'],tags:['data'],scope:'native'},

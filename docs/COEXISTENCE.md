@@ -18,22 +18,48 @@ With `mode: "auto"` and default `autoBind: "adaptive"`: in a normal single-agent
 
 ## Configuration Examples
 
-Standard setup:
+Global or project-local standard setup (`opencode.json` / `opencode.jsonc`):
 
 ```jsonc
-{"plugins":[{"package":"./plugins/lazy-skills"}]}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["opencode-lazy-se@latest"]
+}
 ```
 
 Discovery-only (when another binder manages all automatic skill selection):
 
 ```jsonc
-{"plugins":[{"package":"./plugins/lazy-skills","options":{"autoBind":"off","nativeCatalog":"preserve","hints":"off"}}]}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    [
+      "opencode-lazy-se@latest",
+      {
+        "autoBind": "off",
+        "nativeCatalog": "preserve",
+        "hints": "off"
+      }
+    ]
+  ]
+}
 ```
 
 Opt-in catalog hiding and prompt hints:
 
 ```jsonc
-{"plugins":[{"package":"./plugins/lazy-skills","options":{"nativeCatalog":"hide","hints":"hint"}}]}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    [
+      "opencode-lazy-se@latest",
+      {
+        "nativeCatalog": "hide",
+        "hints": "hint"
+      }
+    ]
+  ]
+}
 ```
 
 Test the last example before combining with another skill-catalog plugin: `hide` sets `autoinvoke: false` on native catalog entries, which may affect other plugins' expectations.

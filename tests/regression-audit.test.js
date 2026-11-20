@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createPlugin } from '../src/plugin.js';
-import { configure } from '../src/core/config.js';
-import { createSearchIndex, search } from '../src/core/rank.js';
-import { detectLanguage, parseQuery, tokenize } from '../src/core/text.js';
-import { listResources } from '../src/core/resources.js';
-import { safeRead } from '../src/core/security.js';
-import { selectBindings } from '../src/core/selection.js';
-import { Catalog } from '../src/core/catalog.js';
-import { scanVaults } from '../src/core/scanner.js';
+import { createPlugin } from '../dist/plugin.js';
+import { configure } from '../dist/core/config.js';
+import { createSearchIndex, search } from '../dist/core/rank.js';
+import { detectLanguage, parseQuery, tokenize } from '../dist/core/text.js';
+import { listResources } from '../dist/core/resources.js';
+import { safeRead } from '../dist/core/security.js';
+import { selectBindings } from '../dist/core/selection.js';
+import { Catalog } from '../dist/core/catalog.js';
+import { scanVaults } from '../dist/core/scanner.js';
 
 function makeHost(root, options = {}, native = [], agents = null) {
   const tools = new Map(), hooks = new Map(), sessions = new Map();
@@ -233,7 +233,7 @@ test('Issue 18: parseFrontmatter handles UTF-8 BOM and trailing spaces on openin
   assert.ok(parsed);
   const fm = '\uFEFF---  \ndescription: BOM skill\n---\nBody text';
   return scanVaults(configure({ roots: [] }, {})).then(async () => {
-    const { parseFrontmatter } = await import('../src/core/scanner.js');
+    const { parseFrontmatter } = await import('../dist/core/scanner.js');
     const out = parseFrontmatter(fm);
     assert.equal(out.meta.description, 'BOM skill');
     assert.equal(out.body, 'Body text');
@@ -266,7 +266,7 @@ test('Issue 12: matchConcepts + termsFor does not shift mask indices after suppl
 });
 
 test('Issue 14: HostSkillPolicy keeps previous valid roster on transient error and allows agents without skill rules', async () => {
-  const { HostSkillPolicy } = await import('../src/core/host-policy.js');
+  const { HostSkillPolicy } = await import('../dist/core/host-policy.js');
   let calls = 0;
   const domain = {
     list: async () => {

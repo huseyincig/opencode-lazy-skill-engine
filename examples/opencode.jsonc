@@ -1,17 +1,19 @@
-// Copy this directory to ./plugins/lazy-skills or use a published package name.
-// No external agent system, model or fixed OpenCode patch version is required.
+// Global (~/.config/opencode/opencode.jsonc) or project-local (<project>/opencode.jsonc) example.
+// Install from npm ("opencode-lazy-se@latest") or use a local path ("./plugins/lazy-skills").
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": [{
-    "package": "./plugins/lazy-skills",
-    "options": {
-      "mode": "auto",
-      "autoBind": "adaptive",
-      "coexistence": "respect",
-      "respectHostPermissions": true,
-      "nativeCatalog": "preserve",
-      "hints": "off",
-      "vaultAutoBind": false
-    }
-  }]
+  "plugins": [
+    [
+      "opencode-lazy-se@latest",
+      {
+        "mode": "auto",
+        "autoBind": "adaptive",
+        "coexistence": "respect",
+        "respectHostPermissions": true,
+        "nativeCatalog": "preserve",
+        "hints": "off",
+        "vaultAutoBind": false
+      }
+    ]
+  ]
 }

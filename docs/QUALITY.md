@@ -14,7 +14,8 @@ Target runtime: OpenCode V2 Promise server plugin. Local verification uses `node
 | Host-neutral orchestration, stemming & YAML hardening | `tests/host-hardening.test.js` | PASS (Local) |
 | OpenCode V2.3.2 contract alignment, cache invalidation & validation | `tests/v232-audit.test.js` | PASS (Local) |
 | Mesh bridge provenance, rollback, YAML/stemming & session cleanup | `tests/debug-audit.test.js` | PASS (Local) |
-| Syntax & full unit test suite (175 tests / 12 files) | `npm run check` | PASS (Local) |
+| TUI sidebar lifecycle, RPC schema & conflict detection | `tests/tui-rpc.test.js` | PASS (Local) |
+| Syntax & full unit test suite (179 tests / 13 files) | `npm run check` | PASS (Local) |
 | Package tarball surface | `npm pack --dry-run` | PASS (Local) |
 | Sandbox OpenCode V2 packed-artifact load | `opencode v2.3.2 --standalone api skill.list` + `session.create` | PASS (Isolated sandbox) |
 | Multi-plugin live load order & multi-turn sessions | Multi-plugin live host session | **NOT_RUN** |

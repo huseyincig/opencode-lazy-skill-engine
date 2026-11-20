@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createPlugin } from '../src/plugin.js';
-import { configure } from '../src/core/config.js';
-import { selectBindings, automaticCandidates } from '../src/core/selection.js';
+import { createPlugin } from '../dist/plugin.js';
+import { configure } from '../dist/core/config.js';
+import { selectBindings, automaticCandidates } from '../dist/core/selection.js';
 
 function makeHost(root, options = {}, native = []) {
   const tools = new Map(), hooks = new Map(), sessions = new Map(), calls = { get:0 }, events = [];

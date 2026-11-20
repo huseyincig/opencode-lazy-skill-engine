@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createPlugin } from '../src/plugin.js';
-import { configure } from '../src/core/config.js';
-import { parseFrontmatter, normalizeEntry } from '../src/core/scanner.js';
-import { selectBindings, extractExplicit, automaticCandidates } from '../src/core/selection.js';
-import { parseSemanticIDs, SemanticRouter } from '../src/core/semantic.js';
-import { Catalog } from '../src/core/catalog.js';
+import { createPlugin } from '../dist/plugin.js';
+import { configure } from '../dist/core/config.js';
+import { parseFrontmatter, normalizeEntry } from '../dist/core/scanner.js';
+import { selectBindings, extractExplicit, automaticCandidates } from '../dist/core/selection.js';
+import { parseSemanticIDs, SemanticRouter } from '../dist/core/semantic.js';
+import { Catalog } from '../dist/core/catalog.js';
 
 const skill=(id,description='Safe code review',origin='global',extra={})=>({id,name:id,description,keywords:[],aliases:[],tags:[],triggers:[],negativeTriggers:[],roles:[],scope:'native',origin,...extra});
 
@@ -206,7 +206,7 @@ test('Role-less parent does not auto-bind in workers mode',async()=>{
 });
 
 test('Exact and AND matches outrank partial candidates even with large prefix overlap',async()=>{
- const {search,createSearchIndex}=await import('../src/core/rank.js');
+ const {search,createSearchIndex}=await import('../dist/core/rank.js');
  const docs=[skill('both','migration audit'),...Array.from({length:100},(_,i)=>skill(`migration-${i}`,'migration migration migration migration migration'))];
  const index=createSearchIndex(docs);
  const r=search(index,'migration audit',{topK:1});assert.equal(r[0].skill.id,'both');

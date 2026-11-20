@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import {createSearchIndex,search} from '../src/core/rank.js';
+import {createSearchIndex,search} from '../dist/core/rank.js';
 const skills=Array.from({length:3000},(_,i)=>({
  id:`skill-${i}`,name:`Skill ${i} security review ${i%19===0?'performance test':'database docs'}`,
  description:`Review source code quality and security in application project ${i}. Use detailed checks, unit tests and documentation where appropriate.`,

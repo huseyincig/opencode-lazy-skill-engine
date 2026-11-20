@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createSearchIndex,search} from '../src/core/rank.js';
-import {fold,parseQuery,tokenize} from '../src/core/text.js';
-import {matchConcepts} from '../src/core/concepts.js';
+import {createSearchIndex,search} from '../dist/core/rank.js';
+import {fold,parseQuery,tokenize} from '../dist/core/text.js';
+import {matchConcepts} from '../dist/core/concepts.js';
 const skills=Array.from({length:150},(_,i)=>({id:`id-${i}`,name:`Skill ${i}`,description:`Security review and documentation ${i}`,keywords:['security','review'],aliases:[],tags:[],scope:'vault'}));
 const idx=createSearchIndex(skills);
 test('Fuzz mixed scripts, quotes, punctuation and combining marks without throws',()=>{
@@ -21,9 +21,9 @@ test('Search results remain bounded and repeatable',()=>{
   assert.deepEqual(a.map(x=>x.skill.id),b.map(x=>x.skill.id));assert.equal(a.length,3);
 });
 test('No automatic remote calls, command substitution, or skill body evaluation',async()=>{
-  const {safeRead}=await import('../src/core/security.js');
+  const {safeRead}=await import('../dist/core/security.js');
   assert.equal(typeof safeRead,'function');
-  const {createPlugin}=await import('../src/plugin.js');assert.equal(typeof createPlugin().setup,'function');
+  const {createPlugin}=await import('../dist/plugin.js');assert.equal(typeof createPlugin().setup,'function');
 });
 test('Bounded top-k selection agrees with a larger result set',()=>{
  for(const q of ['security review','security','documentation','id','Skill 100']){

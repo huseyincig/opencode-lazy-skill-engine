@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createPlugin } from '../src/plugin.js';
-import { normalizeNative } from '../src/core/catalog.js';
-import { scanVaults } from '../src/core/scanner.js';
-import { configure } from '../src/core/config.js';
+import { createPlugin } from '../dist/plugin.js';
+import { normalizeNative } from '../dist/core/catalog.js';
+import { scanVaults } from '../dist/core/scanner.js';
+import { configure } from '../dist/core/config.js';
 
 function makeHost(root, options = {}, native = [], agents = null) {
   const tools = new Map();

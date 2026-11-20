@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {fold,tokenize,parseQuery,editDistanceWithinOne,xmlEscape} from '../src/core/text.js';
-import {createSearchIndex,search} from '../src/core/rank.js';
+import {fold,tokenize,parseQuery,editDistanceWithinOne,xmlEscape} from '../dist/core/text.js';
+import {createSearchIndex,search} from '../dist/core/rank.js';
 const weights={id:7,name:6,keywords:5,tags:3,description:1.8};
 const skills=[
  {id:'code-review',name:'Code Review',keywords:['pull request','review'],tags:['quality'],description:'Review application code changes for quality',scope:'vault'},

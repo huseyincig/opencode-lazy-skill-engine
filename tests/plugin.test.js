@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {createPlugin} from '../src/plugin.js';
-import {SessionLedger} from '../src/core/session.js';
-import {renderHints,selectHints} from '../src/core/hint.js';
-import {configure} from '../src/core/config.js';
+import {createPlugin} from '../dist/plugin.js';
+import {SessionLedger} from '../dist/core/session.js';
+import {renderHints,selectHints} from '../dist/core/hint.js';
+import {configure} from '../dist/core/config.js';
 function mock(root,opts={}){
  const tools=new Map(),hooks=new Map(),mutations=[];let disposals=0;
  const ctx={options:{roots:[root],refreshMs:0,...opts},location:{directory:root,project:{canonical:root}},

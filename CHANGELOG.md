@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0
+
+- Migrate the entire codebase to strict TypeScript (`.ts` / `.tsx`) with compiled `dist/` output, declaration files (`.d.ts`), dual-target OpenTUI/Solid emission (`scripts/emit-tui.mjs`), and root entry shims (`index.js`, `tui.js`).
+- Publish package under npm name **`opencode-lazy-se`** while preserving internal plugin ID `opencode-lazy-skill-engine` for seamless mesh interoperability.
+- Add `LazySidebar` OpenCode V2 TUI sidebar extension (`./tui`) and typed `opencode-lazy-skill.stats` RPC contract (`./rpc`) reporting `version`, `catalogVersion`, `ready`, `skills`, `native`, `vault`, `local`, `global`, `conflicts`, and `conflictIds`, with automatic stale-snapshot reset on workspace directory changes.
+- Add Universal OpenCode V2 Plugin Mesh bridge (`src/bridge.ts`, `BRIDGE_REVISION = "2.3.0"`) for zero-dependency interoperability with `opencode-hi`, `opencode-guardian`, and `opencode-smart-questions` (`skills.catalog` capability, `queryMeshSkills`, `claimPromptSkillBinding` turn ownership protection, `isTrustedMeshMessage` provenance verification, `skill-injection` metadata protection, and `session.deleted` state cleanup).
+- Detect multi-vault, native-vs-vault, native-vs-native, and `maxSkills`-capped skill ID conflicts in `Catalog.refresh()` and `scanVaults()`.
+- Handle empty frontmatter (`---\n---`), multiline indented scalars, and indented YAML comments (`  # comment`) cleanly in `parseFrontmatter()`, and improve doubled-consonant stemming (`running` -> `run`, `debugging` -> `debug`) in `variants()`.
+- Expand documentation (`README.md`, `docs/ARCHITECTURE.md`, `docs/COEXISTENCE.md`, `docs/QUALITY.md`) with full Global, Project-Local, `.opencode/plugins/` Symlink, `file://`, and Remote TUI (`cli.json`) installation guides and verification matrix (`179 / 179` passing tests).
+
 ## 1.4.5
 
 - Subscribe to `skill.updated` and `agent.updated` via `ctx.event.subscribe` and invalidate the catalog cache on `ctx.skill.transform` replay to eliminate the 30s stale-cache startup race with late-loading plugins.

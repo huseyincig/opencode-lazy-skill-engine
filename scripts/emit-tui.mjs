@@ -1,0 +1,83 @@
+/**
+ * Emit two Solid Universal TUI variants from src/tui.tsx.
+ * Runtime shares OpenCode's virtual Solid renderer; standalone supports Node tests.
+ */
+import { transformSync } from "@babel/core";
+import babelPresetSolid from "babel-preset-solid";
+import babelPresetTypescript from "@babel/preset-typescript";
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const sourcePath = path.join(root, "src", "tui.tsx");
+const dist = path.join(root, "dist");
+const source = readFileSync(sourcePath, "utf8");
+
+function compile(moduleName) {
+  const result = transformSync(source, {
+    filename: sourcePath,
+    babelrc: false,
+    configFile: false,
+    presets: [
+      [babelPresetSolid, { moduleName, generate: "universal" }],
+      [babelPresetTypescript, { isTSX: true, allExtensions: true }],
+    ],
+  });
+  if (!result?.code) throw new Error("Solid Universal TUI compilation failed");
+  return result.code;
+}
+
+const runtime = compile("opentui:runtime-module:%40opentui%2Fsolid")
+  .replace(/from (["'])solid-js\1/g, 'from "opentui:runtime-module:solid-js"')
+  .replace(/from (["'])@opentui\/core\1/g, 'from "opentui:runtime-module:%40opentui%2Fcore"');
+const standalone = compile("@opentui/solid");
+
+if (
+  runtime.includes('from "@opentui/solid"') ||
+  runtime.includes('from "@opentui/solid/jsx-runtime"') ||
+  runtime.includes('from "@opentui/core"') ||
+  runtime.includes('from "solid-js"') ||
+  runtime.includes('from "@opencode/plugin/tui"')
+) {
+  throw new Error("Lazy Skill Engine host TUI still imports an isolated/bare runtime");
+}
+if (
+  !runtime.includes("opentui:runtime-module:%40opentui%2Fsolid") ||
+  !runtime.includes("opentui:runtime-module:solid-js")
+) {
+  throw new Error("Lazy Skill Engine host TUI does not use OpenCode's shared Solid runtime");
+}
+if (!standalone.includes("@opentui/solid")) {
+  throw new Error("Standalone TUI is missing Solid Universal imports");
+}
+
+writeFileSync(path.join(dist, "tui-runtime.js"), runtime + "\n");
+writeFileSync(path.join(dist, "tui-standalone.js"), standalone + "\n");
+writeFileSync(
+  path.join(dist, "tui.js"),
+  [
+    "// Adaptive Lazy Skill Engine TUI entrypoint: host runtime first, standalone Node fallback.",
+    "let hostRuntime = false;",
+    "try {",
+    '  await import("opentui:runtime-module:%40opentui%2Fsolid");',
+    "  hostRuntime = true;",
+    "} catch {",
+    "  hostRuntime = false;",
+    "}",
+    "let implementation;",
+    "if (hostRuntime) {",
+    '  implementation = await import("./tui-runtime.js");',
+    "} else {",
+    "  try {",
+    '    implementation = await import("./tui-standalone.js");',
+    "  } catch {",
+    '    implementation = { default: { id: "opencode-lazy-skill-engine.tui", setup: async () => undefined } };',
+    "  }",
+    "}",
+    "export default implementation.default;",
+    "export const setup = implementation.default.setup;",
+    "",
+  ].join("\n")
+);
+console.error("[emit-tui] Lazy Skill Engine host, standalone and adaptive TUI emitted");

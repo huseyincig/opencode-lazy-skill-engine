@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createPlugin } from '../src/plugin.js';
-import { parseFrontmatter } from '../src/core/scanner.js';
-import { createSearchIndex, search } from '../src/core/rank.js';
-import { variants } from '../src/core/text.js';
+import { createPlugin } from '../dist/plugin.js';
+import { parseFrontmatter } from '../dist/core/scanner.js';
+import { createSearchIndex, search } from '../dist/core/rank.js';
+import { variants } from '../dist/core/text.js';
 import {
   claimPromptSkillBinding,
   getMeshPeers,
@@ -14,7 +14,7 @@ import {
   queryMeshSkills,
   resetMeshStateForTests,
   stampMeshMetadata,
-} from '../src/bridge.js';
+} from '../dist/bridge.js';
 
 function makeHost(root, options = {}, native = [], extra = {}) {
   const tools = new Map();
@@ -175,6 +175,7 @@ test('Debug Finding 4: claimPromptSkillBinding skips duplicate semantic.select w
   let semanticCalls = 0;
   const host = makeHost(root, {
     autoBind: 'all',
+    singleAgent: { minScore: 1 },
     semantic: { enabled: true, model: 'p/m' },
   }, [
     { id: 's1', name: 'S1', description: 'Alpha workflow' },
@@ -196,18 +197,28 @@ test('Debug Finding 4: claimPromptSkillBinding skips duplicate semantic.select w
   const event = {
     sessionID: 'ses-claim',
     messageID: 'msg-1',
-    prompt: { text: 'unrelated prompt needing semantic', skills: [] },
+    prompt: { text: 'Alpha workflow', skills: [] },
   };
   await host.hooks.get('prompt')(event);
   assert.equal(semanticCalls, 0);
+  assert.deepEqual(event.prompt.skills, [], 'should not auto-attach router/default skills when another plugin claimed the turn');
+
+  // Explicit skill request (skill:s1) on a claimed turn should still be honored if not already bound
+  const explicitEvent = {
+    sessionID: 'ses-claim',
+    messageID: 'msg-1',
+    prompt: { text: 'Use skill:s1 explicitly', skills: [] },
+  };
+  await host.hooks.get('prompt')(explicitEvent);
+  assert.deepEqual(explicitEvent.prompt.skills, [{ id: 's1' }]);
 });
 
-test('Debug Finding 5: parseFrontmatter handles empty frontmatter (---\\n---) and multiline indented scalars', () => {
+test('Debug Finding 5: parseFrontmatter handles empty frontmatter (---\\n---), multiline indented scalars, and ignores indented comments', () => {
   const emptyFm = '---\n---\nFirst paragraph\n\n---\n\nSecond paragraph';
   const parsedEmpty = parseFrontmatter(emptyFm);
   assert.equal(parsedEmpty.body.trim(), 'First paragraph\n\n---\n\nSecond paragraph');
 
-  const multilineScalar = '---\ndescription:\n  First line\n  second line\n---\nBody content';
+  const multilineScalar = '---\ndescription:\n  First line\n  # indented comment should not add trailing space\n  second line\n  # trailing indented comment\n---\nBody content';
   const parsedMulti = parseFrontmatter(multilineScalar);
   assert.equal(parsedMulti.meta.description, 'First line second line');
   assert.equal(parsedMulti.body.trim(), 'Body content');
@@ -281,4 +292,31 @@ test('Debug Finding 9: variants() reduces doubled consonants (running->run) and 
   ]);
   const hits = search(idx, 'code -vulnerabilities', { topK: 5 });
   assert.equal(hits.length, 0);
+});
+
+test('Stats RPC snapshot returns string pkgVersion matching LAZY_SKILL_STATS_RPC output schema', async t => {
+  resetMeshStateForTests();
+  const root = await mkdtemp(join(tmpdir(), 'lse-dbg-rpc-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const { LAZY_SKILL_STATS_RPC } = await import('../dist/stats-rpc.js');
+  let statsHandler = null;
+  const host = makeHost(root, {}, [{ id: 's1', name: 'S1', description: 'Skill one' }], {
+    rpc: {
+      register: async (def, handlers) => {
+        if (def.id === LAZY_SKILL_STATS_RPC.id) statsHandler = handlers;
+        return { dispose: async () => {} };
+      },
+    },
+  });
+  const cleanup = await createPlugin().setup(host.ctx);
+  t.after(cleanup);
+
+  assert.ok(statsHandler, 'expected LAZY_SKILL_STATS_RPC handler to be registered');
+  const snap = await statsHandler.snapshot();
+  assert.equal(typeof snap.version, 'string');
+  assert.match(snap.version, /^\d+\.\d+\.\d+/);
+  for (const key of LAZY_SKILL_STATS_RPC.methods.snapshot.output.required) {
+    assert.notEqual(snap[key], undefined, `missing required field ${key}`);
+  }
 });
