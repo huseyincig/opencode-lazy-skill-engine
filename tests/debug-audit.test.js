@@ -12,6 +12,8 @@ import {
   getMeshPeers,
   isMeshProtectedPart,
   queryMeshSkills,
+  registerMeshPeer,
+  registerRoleProfileResolver,
   resetMeshStateForTests,
   stampMeshMetadata,
 } from '../dist/bridge.js';
@@ -332,4 +334,388 @@ test('Out-of-the-box defaults balance activation on relevant prompts without ove
   assert.equal(opts.singleAgent.minScore, 2.5);
   assert.equal(opts.singleAgent.minCoverage, 0.3);
   assert.equal(opts.singleAgent.maxActive, 2);
+});
+
+test('Mesh Interop 1: extractLazyTaskMeta and task delegation vs synthetic control nudge classification', async t => {
+  resetMeshStateForTests();
+  const root = await mkdtemp(join(tmpdir(), 'lse-mesh-interop-1-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const host = makeHost(root, { autoBind: 'all', hints: 'hint', singleAgent: { minScore: 1 } }, [
+    { id: 'audit-skill', name: 'Audit', description: 'Security audit review code' },
+    { id: 'req-skill', name: 'Required', description: 'Required task skill' },
+  ]);
+  host.sessions.set('worker-1', { agent: 'hi-coder', parentID: 'root-1' });
+  const cleanup = await createPlugin().setup(host.ctx);
+  t.after(cleanup);
+
+  // 1a. Task delegation dispatch (hi-internal === "dispatch" + kind === "delegation") allows role-scoped auto selection
+  const dispatchMeta = stampMeshMetadata(
+    'worker-1',
+    { owner: 'opencode-hi', kind: 'delegation', taskID: 'task-101' },
+    { 'opencode-hi': true, 'opencode-smart-questions': true, 'hi-internal': 'dispatch' }
+  );
+  const dispatchEvent = {
+    sessionID: 'worker-1',
+    synthetic: true,
+    prompt: { text: 'Security audit review code', skills: [], metadata: dispatchMeta },
+  };
+  await host.hooks.get('prompt')(dispatchEvent);
+  assert.deepEqual(dispatchEvent.prompt.skills, [{ id: 'audit-skill' }]);
+
+  // 1b. Task delegation dispatch also reads requiredSkills from prompt.metadata["opencode-mesh"]
+  const meshReqEvent = {
+    sessionID: 'worker-1',
+    prompt: {
+      text: 'Run task',
+      skills: [],
+      metadata: {
+        'opencode-mesh': { v: 2, owner: 'opencode-hi', kind: 'delegation', token: 'tok', taskID: 'task-102', requiredSkills: ['req-skill'] },
+      },
+    },
+  };
+  await host.hooks.get('prompt')(meshReqEvent);
+  assert.deepEqual(meshReqEvent.prompt.skills, [{ id: 'req-skill' }]);
+
+  // 1c. Synthetic control nudges (silent-reprompt, continuation, guardian, smart-questions) skip automatic routing & hints
+  const silentRepromptMeta = stampMeshMetadata(
+    'worker-1',
+    { owner: 'opencode-hi', kind: 'delegation', taskID: 'task-101', requiredSkills: ['req-skill'] },
+    { 'opencode-hi': true, 'hi-internal': 'silent-reprompt' }
+  );
+  const silentRepromptEvent = {
+    sessionID: 'worker-1',
+    metadata: silentRepromptMeta,
+    // req-skill is already bound; automatic routing for 'audit-skill' and hints must be skipped on silent-reprompt!
+    prompt: { text: 'Security audit review code', skills: [{ id: 'req-skill' }] },
+  };
+  await host.hooks.get('prompt')(silentRepromptEvent);
+  assert.deepEqual(silentRepromptEvent.prompt.skills, [{ id: 'req-skill' }]);
+  assert.ok(!silentRepromptEvent.prompt.text.includes('<lazy_skill_suggestions'));
+
+  for (const nudgeMeta of [
+    { 'opencode-guardian': true },
+    { 'opencode-smart-questions': true },
+    { 'opencode-hi': true, 'hi-internal': 'continuation' },
+    { 'opencode-hi': true, 'hi-internal': 'attention' },
+    { 'opencode-hi': true, 'hi-internal': 'supervisor' },
+    { 'opencode-hi': true, 'hi-internal': 'peer' },
+  ]) {
+    const ev = {
+      sessionID: 'worker-1',
+      metadata: nudgeMeta,
+      prompt: { text: 'Security audit review code', skills: [] },
+    };
+    await host.hooks.get('prompt')(ev);
+    assert.deepEqual(ev.prompt.skills, []);
+    assert.ok(!ev.prompt.text.includes('<lazy_skill_suggestions'));
+  }
+});
+
+test('Mesh Interop 2: opencode-hi role profile cooperation, empty claim avoidance, and hint suppression on claimed turns', async t => {
+  resetMeshStateForTests();
+  const root = await mkdtemp(join(tmpdir(), 'lse-mesh-interop-2-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const disposePeer = registerMeshPeer({
+    id: 'opencode-hi',
+    directory: root,
+    capabilities: ['orchestration.task'],
+  });
+  t.after(disposePeer);
+
+  const profiles = new Map();
+  const disposeResolver = registerRoleProfileResolver({
+    owner: 'opencode-hi',
+    directory: root,
+    resolve: (sessionID) => profiles.get(sessionID),
+  });
+  t.after(disposeResolver);
+
+  let semanticResult = [];
+  const host = makeHost(
+    root,
+    {
+      autoBind: 'adaptive',
+      mode: 'auto',
+      hints: 'hint',
+      minAutoScore: 1,
+      semantic: { enabled: true, model: 'p/m' },
+    },
+    [
+      { id: 'allowed-one', name: 'Allowed One', description: 'Security audit review code' },
+      { id: 'allowed-two', name: 'Allowed Two', description: 'Security audit review code quality' },
+      { id: 'forbidden-three', name: 'Forbidden Three', description: 'Security audit review code vulnerabilities' },
+    ],
+    {
+      experimental: {
+        generate: {
+          text: async () => ({ text: JSON.stringify({ skills: semanticResult }) }),
+        },
+      },
+    }
+  );
+  const cleanup = await createPlugin().setup(host.ctx);
+  t.after(cleanup);
+
+  // 2a. Primary manager session with autoBind: "workers" does not auto-bind in adaptive mode
+  profiles.set('ses-manager', {
+    sessionID: 'ses-manager',
+    agentName: 'hi-manager',
+    capability: 'write-allowed',
+    access: 'primary',
+    allowedSkills: ['allowed-one', 'allowed-two'],
+    maxActiveSkills: 1,
+    autoBind: 'workers',
+    managedBy: 'opencode-hi',
+  });
+  const mgrEvent = {
+    sessionID: 'ses-manager',
+    prompt: { text: 'Security audit review code', skills: [] },
+  };
+  await host.hooks.get('prompt')(mgrEvent);
+  assert.deepEqual(mgrEvent.prompt.skills, []);
+
+  // 2b. Worker session respects opencode-hi allowedSkills and maxActiveSkills (1)
+  profiles.set('ses-worker', {
+    sessionID: 'ses-worker',
+    agentName: 'hi-coder',
+    capability: 'write-allowed',
+    access: 'read-write',
+    taskID: 'task-201',
+    allowedSkills: ['allowed-one', 'allowed-two'],
+    defaultSkills: ['allowed-two'],
+    maxActiveSkills: 1,
+    autoBind: 'workers',
+    managedBy: 'opencode-hi',
+  });
+  const workerEvent = {
+    sessionID: 'ses-worker',
+    messageID: 'turn-w1',
+    prompt: { text: 'Security audit review code vulnerabilities', skills: [] },
+  };
+  await host.hooks.get('prompt')(workerEvent);
+  assert.equal(workerEvent.prompt.skills.length, 1);
+  assert.ok(['allowed-one', 'allowed-two'].includes(workerEvent.prompt.skills[0].id));
+
+  // 2c. When semantic.select returns [], LSE does NOT claim the turn with empty plan.ids
+  semanticResult = [];
+  const emptyEvent = {
+    sessionID: 'ses-worker',
+    messageID: 'turn-empty',
+    prompt: { text: 'Completely unrelated prompt text xyzzy', skills: [] },
+  };
+  // Temporarily remove defaultSkills so lexical and default are empty and semantic runs
+  profiles.set('ses-worker', {
+    ...profiles.get('ses-worker'),
+    defaultSkills: [],
+  });
+  await host.hooks.get('prompt')(emptyEvent);
+  assert.deepEqual(emptyEvent.prompt.skills, []);
+  const peerClaimAfterEmpty = claimPromptSkillBinding('ses-worker', 'turn-empty', 'opencode-hi', ['allowed-one']);
+  assert.equal(peerClaimAfterEmpty.claimed, true, 'LSE must not claim turn when 0 skills were selected');
+
+  // 2d. When another plugin already claimed the turn, LSE skips <lazy_skill_suggestions> hint injection
+  claimPromptSkillBinding('ses-worker', 'turn-peer-claimed', 'opencode-hi', ['allowed-one']);
+  const hintCheckEvent = {
+    sessionID: 'ses-worker',
+    messageID: 'turn-peer-claimed',
+    prompt: { text: 'Security audit review code quality', skills: [] },
+  };
+  await host.hooks.get('prompt')(hintCheckEvent);
+  assert.ok(!hintCheckEvent.prompt.text.includes('<lazy_skill_suggestions'));
+});
+
+test('Mesh Interop 3 & 4: registerSkillCatalogProvider scope sanitization & origin preservation, and session.deleted event shapes', async t => {
+  resetMeshStateForTests();
+  const root = await mkdtemp(join(tmpdir(), 'lse-mesh-interop-3-'));
+  const extVault = await mkdtemp(join(tmpdir(), 'lse-mesh-ext-3-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(extVault, { recursive: true, force: true }));
+
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  await mkdir(join(extVault, 'ext-sec'), { recursive: true });
+  await writeFile(join(extVault, 'ext-sec', 'SKILL.md'), '---\ndescription: External security audit\n---\nExternal body');
+
+  const projSkillDir = join(root, '.opencode', 'skill-vault', 'proj-sec');
+  await mkdir(projSkillDir, { recursive: true });
+  await writeFile(join(projSkillDir, 'SKILL.md'), '---\ndescription: Project security audit\n---\nProject body');
+
+  const host = makeHost(root, { roots: [extVault], autoBind: 'all' }, [
+    { id: 'host-sec', name: 'Host Sec', description: 'Host security audit' },
+  ]);
+  const cleanup = await createPlugin().setup(host.ctx);
+  t.after(cleanup);
+
+  // Invalid scope like "all" is sanitized instead of filtering out everything
+  const hitsAllScope = await queryMeshSkills('security audit', {
+    directory: root,
+    scope: 'all',
+  });
+  assert.ok(Array.isArray(hitsAllScope));
+  assert.equal(hitsAllScope.length, 3);
+  const extHit = hitsAllScope.find((h) => h.id === 'ext-sec');
+  const projHit = hitsAllScope.find((h) => h.id === 'proj-sec');
+  const hostHit = hitsAllScope.find((h) => h.id === 'host-sec');
+  assert.equal(extHit?.origin, 'host');
+  assert.equal(projHit?.origin, 'project');
+  assert.equal(hostHit?.origin, 'host');
+
+  // Valid scope "vault" filters to vault only
+  const hitsVault = await queryMeshSkills('security audit', {
+    directory: root,
+    scope: 'vault',
+  });
+  assert.equal(hitsVault.length, 2);
+  assert.ok(hitsVault.every((h) => h.scope === 'vault'));
+
+  // session.deleted supports ev.data.info.id, ev.data.sessionID, ev.data.id, ev.properties.id
+  for (const [sid, payload] of [
+    ['ses-d1', { type: 'session.deleted', properties: { id: 'ses-d1' } }],
+    ['ses-d2', { type: 'session.deleted', data: { info: { id: 'ses-d2' } } }],
+    ['ses-d3', { type: 'session.deleted', data: { sessionID: 'ses-d3' } }],
+    ['ses-d4', { type: 'session.deleted', data: { id: 'ses-d4' } }],
+  ]) {
+    await host.hooks.get('prompt')({
+      sessionID: sid,
+      prompt: { text: 'Run audit', skills: [] },
+      metadata: { lazySkill: { requiredSkills: ['host-sec'] } },
+    });
+    const before = JSON.parse((await host.tools.get('lazy_skill_status').execute({}, { sessionID: sid })).content);
+    assert.ok(before.receipt);
+    host.emit(payload);
+    await new Promise((r) => setTimeout(r, 10));
+    const after = JSON.parse((await host.tools.get('lazy_skill_status').execute({}, { sessionID: sid })).content);
+    assert.equal(after.receipt, null, `expected session.deleted cleanup for ${sid}`);
+  }
+});
+
+test('Deep Audit 1-5 & 7: lazy_skill_plan mesh parity, mesh/host permission enforcement on explicit & load/resource, mixed-meta nudge guard, hint permission filtering, and catalog fast retry', async t => {
+  resetMeshStateForTests();
+  const root = await mkdtemp(join(tmpdir(), 'lse-deep-audit-'));
+  const extVault = await mkdtemp(join(tmpdir(), 'lse-deep-vault-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(extVault, { recursive: true, force: true }));
+
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  await mkdir(join(extVault, 'vault-secret'), { recursive: true });
+  await writeFile(
+    join(extVault, 'vault-secret', 'SKILL.md'),
+    '---\ndescription: Secret vault audit workflow\nnegativeTriggers: [do not audit]\n---\nSecret vault body'
+  );
+
+  const profiles = new Map();
+  const disposeResolver = registerRoleProfileResolver({
+    owner: 'opencode-hi',
+    directory: root,
+    resolve: (sessionID) => profiles.get(sessionID),
+  });
+  t.after(disposeResolver);
+
+  let failNativeOnce = true;
+  const nativeSkills = [
+    { id: 'allowed-skill', name: 'Allowed', description: 'Allowed security workflow' },
+    { id: 'forbidden-skill', name: 'Forbidden', description: 'Forbidden security workflow', autoinvoke: false },
+  ];
+  const host = makeHost(
+    root,
+    {
+      roots: [extVault],
+      refreshMs: 30000,
+      hints: 'hint',
+      minHintCoverage: 0.3,
+      respectHostPermissions: true,
+    },
+    nativeSkills,
+    {
+      agent: {
+        list: async () => ({
+          data: [
+            {
+              id: 'restricted-worker',
+              mode: 'subagent',
+              permissions: [
+                { action: 'skill', resource: '*', effect: 'deny' },
+                { action: 'skill', resource: 'allowed-skill', effect: 'allow' },
+              ],
+            },
+          ],
+        }),
+      },
+    }
+  );
+  const origList = host.ctx.skill.list;
+  host.ctx.skill.list = async () => {
+    if (failNativeOnce) {
+      failNativeOnce = false;
+      throw new Error('transient native list error');
+    }
+    return origList();
+  };
+
+  const cleanup = await createPlugin().setup(host.ctx);
+  t.after(cleanup);
+
+  // Finding 7: Catalog recovers from transient native failure without waiting 30s
+  const stAfterTransient = await host.tools.get('lazy_skill_status').execute({}, { sessionID: 'ses-1' });
+  const parsedSt = JSON.parse(stAfterTransient.content);
+  assert.equal(parsedSt.ready, ' partial'.trim() === 'partial' ? 'ready' : 'ready');
+
+  // Set up mesh profile restricting ses-mesh-worker to allowed-skill only
+  profiles.set('ses-mesh-worker', {
+    sessionID: 'ses-mesh-worker',
+    agentName: 'restricted-worker',
+    capability: 'write-allowed',
+    access: 'read-write',
+    taskID: 'task-900',
+    allowedSkills: ['allowed-skill'],
+    maxActiveSkills: 1,
+    autoBind: 'workers',
+    managedBy: 'opencode-hi',
+  });
+
+  // Finding 1: lazy_skill_plan consults meshProfile when sessionID is provided
+  const planRes = JSON.parse(
+    (await host.tools.get('lazy_skill_plan').execute({ query: 'Allowed security workflow' }, { sessionID: 'ses-mesh-worker' })).content
+  );
+  assert.equal(planRes.agent, 'restricted-worker');
+  assert.equal(planRes.mode, 'orchestrator');
+  assert.deepEqual(planRes.ids, ['allowed-skill']);
+
+  // Finding 2a: Explicit skill:forbidden-skill in prompt cannot bypass meshProfile.allowedSkills
+  const explicitBypassEv = {
+    sessionID: 'ses-mesh-worker',
+    prompt: { text: 'Try using skill:forbidden-skill now', skills: [] },
+  };
+  await host.hooks.get('prompt')(explicitBypassEv);
+  assert.deepEqual(explicitBypassEv.prompt.skills, []);
+
+  // Finding 2b: lazy_skill_load enforces host agent permissions & meshProfile.allowedSkills on vault skills
+  await assert.rejects(
+    host.tools.get('lazy_skill_load').execute({ id: 'vault-secret' }, { sessionID: 'ses-mesh-worker', agent: 'restricted-worker' }),
+    /denied by (host agent permissions|active role profile)/i
+  );
+
+  // Finding 3: Mixed metadata (prompt.metadata has delegation/dispatch, event.metadata has guardian/silent-reprompt) is treated as synthetic control nudge
+  const mixedNudgeEv = {
+    sessionID: 'ses-mesh-worker',
+    metadata: { 'opencode-guardian': true, 'hi-internal': 'silent-reprompt' },
+    prompt: {
+      text: 'Allowed security workflow',
+      skills: [],
+      metadata: { 'hi-internal': 'dispatch', 'opencode-mesh': { kind: 'delegation' } },
+    },
+  };
+  await host.hooks.get('prompt')(mixedNudgeEv);
+  assert.deepEqual(mixedNudgeEv.prompt.skills, []);
+
+  // Finding 5: Hints respect negativeTriggers and host agent permissions (neither forbidden-skill nor negative-triggered vault-secret is hinted)
+  host.sessions.set('ses-hint-restricted', { agent: 'restricted-worker', parentID: 'root-1' });
+  const hintEv = {
+    sessionID: 'ses-hint-restricted',
+    prompt: { text: 'Forbidden security workflow and secret vault audit workflow do not audit', skills: [] },
+  };
+  await host.hooks.get('prompt')(hintEv);
+  assert.ok(!hintEv.prompt.text.includes('forbidden-skill'), 'denied skill must not be hinted');
+  assert.ok(!hintEv.prompt.text.includes('vault-secret'), 'negative-triggered or denied vault skill must not be hinted');
 });

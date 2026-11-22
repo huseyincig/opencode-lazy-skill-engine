@@ -1,7 +1,7 @@
 {
   "name": "opencode-lazy-se",
-  "version": "1.5.0",
-  "description": "Host-neutral, multilingual, cooperative lazy skill discovery and binding for OpenCode V2",
+  "version": "1.5.1",
+  "description": "Host-neutral, 13-language lazy skill discovery, permission-aware binding, cold-vault access, and TUI sidebar for OpenCode V2",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -31,12 +31,16 @@
   "keywords": [
     "opencode",
     "opencode-plugin",
+    "opencode-v2",
     "opencode-lazy-se",
     "opencode-lazy-skill-engine",
     "skills",
+    "skill-router",
+    "skill-discovery",
     "lazy-loading",
     "multilingual",
     "bm25",
+    "typescript",
     "tui",
     "ai-agent"
   ],

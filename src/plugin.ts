@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { readFileSync } from "node:fs";
-import { configure, type LazySkillOptions } from "./core/config.js";
+import { configure, type LazySkillOptions, type RoleConfig } from "./core/config.js";
 import { LAZY_SKILL_STATS_RPC } from "./stats-rpc.js";
 import { Catalog } from "./core/catalog.js";
 import { SessionLedger } from "./core/session.js";
@@ -14,13 +14,18 @@ import { selectBindings, automaticCandidates, extractExplicit, negativeTriggerMa
 import { SemanticRouter, modelFromString, type SemanticGenerator } from "./core/semantic.js";
 import { HostSkillPolicy, hasSkillRules, isOrchestratedRoster, skillPermissionDecision, type AgentDomainLike } from "./core/host-policy.js";
 import {
+  MESH_SYMBOL,
   claimPromptSkillBinding,
   forgetMeshSession,
+  hasMeshCapability,
   isTrustedMeshMessage,
   registerMeshPeer,
   registerMeshStateRpc,
   registerSkillCatalogProvider,
+  resolveMeshAgentProfile,
   stampMeshMetadata,
+  type MeshAgentProfile,
+  type MeshMessageKind,
 } from "./bridge.js";
 
 const escapeBoundary = (text: string, tag: string): string =>
@@ -62,25 +67,130 @@ function abortIfNeeded(context?: { signal?: AbortSignal }): void {
 const readObj = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
-function isSyntheticMetadata(evMeta: Record<string, unknown>, prMeta: Record<string, unknown>, sessionID?: string): boolean {
-  if (isTrustedMeshMessage({ metadata: evMeta }, sessionID) || isTrustedMeshMessage({ metadata: prMeta }, sessionID)) return true;
+const NON_DELEGATION_HI_KINDS = new Set([
+  "continuation",
+  "attention",
+  "supervisor",
+  "peer",
+  "silent-reprompt",
+]);
+
+const NON_DELEGATION_MESH_KINDS = new Set(["remediation", "visible", "handoff", "wake"]);
+
+const SYNTHETIC_CONTROL_MESH_KINDS: readonly MeshMessageKind[] = [
+  "remediation",
+  "visible",
+  "handoff",
+  "wake",
+  "task-contract",
+  "skill-injection",
+];
+
+function isTaskDelegationDispatch(evMeta: Record<string, unknown>, prMeta: Record<string, unknown>): boolean {
+  if (evMeta["opencode-guardian"] === true || prMeta["opencode-guardian"] === true) return false;
+  const evHi = typeof evMeta["hi-internal"] === "string" ? evMeta["hi-internal"] : undefined;
+  const prHi = typeof prMeta["hi-internal"] === "string" ? prMeta["hi-internal"] : undefined;
+  if ((evHi && NON_DELEGATION_HI_KINDS.has(evHi)) || (prHi && NON_DELEGATION_HI_KINDS.has(prHi))) return false;
+  const evMesh = readObj(evMeta["opencode-mesh"]);
+  const prMesh = readObj(prMeta["opencode-mesh"]);
+  const evKind = typeof evMesh.kind === "string" ? evMesh.kind : undefined;
+  const prKind = typeof prMesh.kind === "string" ? prMesh.kind : undefined;
+  if ((evKind && NON_DELEGATION_MESH_KINDS.has(evKind)) || (prKind && NON_DELEGATION_MESH_KINDS.has(prKind))) {
+    return false;
+  }
+  if (evHi === "dispatch" || prHi === "dispatch") return true;
+  return evKind === "delegation" || prKind === "delegation";
+}
+
+function hasSyntheticFlags(meta: Record<string, unknown>): boolean {
   if (
-    evMeta.synthetic === true ||
-    prMeta.synthetic === true ||
-    evMeta.internal === true ||
-    prMeta.internal === true ||
-    evMeta.autoContinue === true ||
-    prMeta.autoContinue === true
+    meta.synthetic === true ||
+    meta.internal === true ||
+    meta.autoContinue === true ||
+    meta["opencode-guardian"] === true ||
+    meta["opencode-smart-questions"] === true ||
+    meta["opencode-hi"] === true ||
+    typeof meta["hi-internal"] === "string"
   ) {
     return true;
   }
-  return Object.values(evMeta).some(
+  const meshEnv = readObj(meta["opencode-mesh"]);
+  if (
+    typeof meshEnv.kind === "string" &&
+    (meshEnv.kind === "remediation" ||
+      meshEnv.kind === "visible" ||
+      meshEnv.kind === "handoff" ||
+      meshEnv.kind === "wake")
+  ) {
+    return true;
+  }
+  return Object.values(meta).some(
     (v) =>
       Boolean(v && typeof v === "object" && !Array.isArray(v)) &&
       ((v as Record<string, unknown>).synthetic === true ||
         (v as Record<string, unknown>).internal === true ||
         (v as Record<string, unknown>).autoContinue === true)
   );
+}
+
+function isSyntheticMetadata(evMeta: Record<string, unknown>, prMeta: Record<string, unknown>, sessionID?: string): boolean {
+  if (isTaskDelegationDispatch(evMeta, prMeta)) return false;
+  if (
+    isTrustedMeshMessage({ metadata: evMeta }, sessionID, SYNTHETIC_CONTROL_MESH_KINDS) ||
+    isTrustedMeshMessage({ metadata: prMeta }, sessionID, SYNTHETIC_CONTROL_MESH_KINDS)
+  ) {
+    return true;
+  }
+  return hasSyntheticFlags(evMeta) || hasSyntheticFlags(prMeta);
+}
+
+function extractLazyTaskMeta(
+  evMeta: Record<string, unknown>,
+  prMeta: Record<string, unknown>
+): { taskId?: string; requiredSkills?: unknown } {
+  const evLazy = readObj(evMeta.lazySkill);
+  const prLazy = readObj(prMeta.lazySkill);
+  const evMesh = readObj(evMeta["opencode-mesh"]);
+  const prMesh = readObj(prMeta["opencode-mesh"]);
+  const rawTaskId =
+    evLazy.taskId ??
+    evLazy.taskID ??
+    prLazy.taskId ??
+    prLazy.taskID ??
+    evMesh.taskID ??
+    evMesh.taskId ??
+    prMesh.taskID ??
+    prMesh.taskId;
+  let requiredSkills: unknown;
+  for (const candidate of [evLazy.requiredSkills, prLazy.requiredSkills, evMesh.requiredSkills, prMesh.requiredSkills]) {
+    if (candidate === undefined) continue;
+    if (requiredSkills === undefined) requiredSkills = candidate;
+    if (!Array.isArray(candidate) || candidate.length > 0) {
+      requiredSkills = candidate;
+      break;
+    }
+  }
+  return {
+    ...(typeof rawTaskId === "string" && rawTaskId ? { taskId: rawTaskId } : {}),
+    ...(requiredSkills !== undefined ? { requiredSkills } : {}),
+  };
+}
+
+function peekPromptSkillClaim(
+  sessionID: string,
+  turnKey: string,
+  owner: string
+): ReturnType<typeof claimPromptSkillBinding> | null {
+  const g = globalThis as unknown as {
+    [MESH_SYMBOL]?: {
+      promptSkillClaims?: Map<string, { owner: string; skillIDs: string[]; claimedAt: number }>;
+    };
+  };
+  const existing = g[MESH_SYMBOL]?.promptSkillClaims?.get(`${sessionID}::${turnKey || "latest"}`);
+  if (existing && Date.now() - existing.claimedAt < 10_000 && existing.owner !== owner) {
+    return { claimed: false, existingOwner: existing.owner, mergedSkillIDs: [...existing.skillIDs] };
+  }
+  return null;
 }
 
 function requireSkillIds(value: unknown): string[] {
@@ -149,13 +259,30 @@ function routeOptions(
   roleName: string | undefined,
   isWorker: boolean,
   hostAllowed: Set<string> | null = null,
-  hostOrchestrated = false
+  hostOrchestrated = false,
+  meshProfile?: MeshAgentProfile
 ) {
   const mode = runtimeMode(opts, isWorker, hostOrchestrated);
-  const autoBind = bindingMode(opts, mode);
-  const role = roleName ? opts.roles[roleName] : undefined;
-  const generic = Object.keys(opts.roles).length === 0;
-  const cap = generic ? opts.singleAgent.maxActive : opts.maxAutoSkills;
+  let autoBind = bindingMode(opts, mode);
+  if (opts.autoBind === "adaptive" && meshProfile?.autoBind) {
+    if (meshProfile.autoBind === "off" || (meshProfile.autoBind === "workers" && meshProfile.access === "primary")) {
+      autoBind = "off";
+    } else {
+      autoBind = meshProfile.autoBind;
+    }
+  }
+  const configuredRole = roleName ? opts.roles[roleName] : undefined;
+  const meshRole: RoleConfig | undefined =
+    !configuredRole && meshProfile?.allowedSkills !== undefined
+      ? {
+          allowed: [...meshProfile.allowedSkills],
+          default: [...(meshProfile.defaultSkills ?? [])],
+          maxActive: meshProfile.maxActiveSkills ?? opts.maxAutoSkills,
+        }
+      : undefined;
+  const role = configuredRole ?? meshRole;
+  const generic = Object.keys(opts.roles).length === 0 && !meshRole;
+  const cap = meshRole ? meshRole.maxActive : generic ? opts.singleAgent.maxActive : opts.maxAutoSkills;
   return {
     mode,
     autoBind,
@@ -188,7 +315,14 @@ export interface PluginContextLike {
   experimental?: { generate?: { text?: SemanticGenerator } };
   generate?: { text?: SemanticGenerator };
   rpc?: { register?: (def: unknown, handlers: Record<string, (...args: unknown[]) => unknown>) => Promise<{ dispose?: () => Promise<void> | void } | undefined> };
-  event?: { subscribe?: (opts: { types?: string[]; signal?: AbortSignal }) => AsyncIterable<{ type?: string; properties?: { info?: { id?: string }; sessionID?: string }; sessionID?: string }> };
+  event?: {
+    subscribe?: (opts: { types?: string[]; signal?: AbortSignal }) => AsyncIterable<{
+      type?: string;
+      properties?: { info?: { id?: string }; sessionID?: string; id?: string };
+      data?: { info?: { id?: string }; sessionID?: string; id?: string };
+      sessionID?: string;
+    }>;
+  };
   skill?: {
     list?: () => Promise<unknown> | unknown;
     transform?: (fn: (editor: { list: () => Array<{ id: string; description?: string; autoinvoke?: boolean }>; update: (id: string, cb: (draft: { autoinvoke?: boolean; description?: string }) => void) => void }) => void) => Promise<{ dispose?: () => Promise<void> | void }>;
@@ -257,13 +391,18 @@ export function createPlugin() {
             search: async (query: string, searchOpts = {}) => {
               const normalizedQuery = Array.isArray(query) ? (query as unknown[]).filter((x): x is string => typeof x === "string").join(" ") : query;
               if (typeof normalizedQuery !== "string") return [];
-              const hits = await catalog.search(normalizedQuery, searchOpts);
+              const safeScope = searchOpts?.scope === "native" || searchOpts?.scope === "vault" ? searchOpts.scope : undefined;
+              const hits = await catalog.search(normalizedQuery, {
+                ...(searchOpts?.topK !== undefined ? { topK: searchOpts.topK } : {}),
+                ...(safeScope !== undefined ? { scope: safeScope } : {}),
+                ...(searchOpts?.allowedIds !== undefined ? { allowedIds: searchOpts.allowedIds } : {}),
+              });
               return hits.map(({ skill, score, coverage }) => ({
                 id: skill.id,
                 name: skill.name,
                 description: skill.description,
                 scope: skill.scope,
-                origin: skill.origin === "project" ? ("project" as const) : ("host" as const),
+                origin: skill.origin ?? "host",
                 score,
                 coverage,
               }));
@@ -284,7 +423,14 @@ export function createPlugin() {
                   if (ev?.type === "skill.updated") catalog.invalidate();
                   else if (ev?.type === "agent.updated") hostPolicy.clear();
                   else if (ev?.type === "session.deleted") {
-                    const sid = ev?.properties?.info?.id ?? ev?.properties?.sessionID ?? ev?.sessionID;
+                    const sid =
+                      ev?.properties?.info?.id ??
+                      ev?.properties?.sessionID ??
+                      ev?.properties?.id ??
+                      ev?.data?.info?.id ??
+                      ev?.data?.sessionID ??
+                      ev?.data?.id ??
+                      ev?.sessionID;
                     if (typeof sid === "string" && sid) {
                       sessions.delete(sid);
                       forgetMeshSession(sid);
@@ -300,7 +446,7 @@ export function createPlugin() {
           try {
             return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
           } catch {
-            return "1.5.0";
+            return "1.5.1";
           }
         })();
 
@@ -485,13 +631,30 @@ export function createPlugin() {
                   if (typeof input.query !== "string" || input.query.length > 12000) throw new Error("Invalid task text");
                   const available = [...(await catalog.refresh()).items.values()];
                   abortIfNeeded(context);
-                  const roleName = typeof input.agent === "string" ? input.agent : undefined;
+                  const meshProfile =
+                    typeof context?.sessionID === "string" && context.sessionID
+                      ? await resolveMeshAgentProfile(context.sessionID, opts.project)
+                      : undefined;
+                  const roleName =
+                    (typeof input.agent === "string" && input.agent ? input.agent : undefined) ??
+                    (typeof meshProfile?.agentName === "string" && meshProfile.agentName ? meshProfile.agentName : undefined);
+                  const isWorker =
+                    typeof input.worker === "boolean"
+                      ? input.worker
+                      : Boolean(
+                          meshProfile &&
+                            (meshProfile.access === "read-write" ||
+                              meshProfile.access === "read-only" ||
+                              (meshProfile.access !== "primary" && meshProfile.taskID))
+                        );
                   const { roster, policy } = opts.respectHostPermissions
                     ? await hostPolicy.forAgent(roleName)
                     : { roster: null, policy: null };
                   abortIfNeeded(context);
-                  const hostAllowed = hostAllowedIds(opts, available, policy, input.worker === true, typeof ctx.agent?.list === "function");
-                  const routing = routeOptions(opts, available, roleName, input.worker === true, hostAllowed, isOrchestratedRoster(roster));
+                  const hostAllowed = hostAllowedIds(opts, available, policy, isWorker, typeof ctx.agent?.list === "function");
+                  const hostOrchestrated =
+                    isOrchestratedRoster(roster) || hasMeshCapability("orchestration.task", opts.project) || Boolean(meshProfile);
+                  const routing = routeOptions(opts, available, roleName, isWorker, hostAllowed, hostOrchestrated, meshProfile);
                   const candidates = routing.automaticIds;
                   const ranked = candidates.size
                     ? await catalog.search(input.query, { topK: 30, allowedIds: candidates, respectNegativeTriggers: true })
@@ -523,13 +686,18 @@ export function createPlugin() {
                     if (forbiddenRequired.length) plan = { ...plan, ids: [], deniedRequired: forbiddenRequired };
                     else plan = { ...plan, ids: plan.ids.filter((id) => skillPermissionDecision(policy, id) === "allow") };
                   }
-                  if (input.worker === true && opts.respectHostPermissions && typeof ctx.agent?.list === "function" && !policy && plan.source === "explicit") {
+                  if (isWorker && opts.respectHostPermissions && typeof ctx.agent?.list === "function" && !policy && plan.source === "explicit") {
                     plan = { ...plan, ids: [], source: "none" };
                   }
                   if (plan.source === "explicit") {
+                    const meshAllowed =
+                      !(roleName && opts.roles[roleName]) && meshProfile?.allowedSkills !== undefined
+                        ? new Set(meshProfile.allowedSkills)
+                        : null;
                     plan = {
                       ...plan,
                       ids: plan.ids.filter((id) => {
+                        if (meshAllowed && !meshAllowed.has(id)) return false;
                         const s = available.find((x) => x.id === id);
                         return s && (s.scope !== "vault" || (opts.vaultAutoBind && (s.origin !== "project" || opts.projectAutoBind)));
                       }),
@@ -580,6 +748,41 @@ export function createPlugin() {
                 },
               });
 
+              const assertVaultSkillPermitted = async (
+                skillId: string,
+                context?: { signal?: AbortSignal; agent?: string | { id?: string }; sessionID?: string },
+                actionLabel = "load vault skills"
+              ) => {
+                if (!agentAllowed(opts, context)) throw new Error(`Agent not permitted to ${actionLabel}`);
+                const meshProfile =
+                  typeof context?.sessionID === "string" && context.sessionID
+                    ? await resolveMeshAgentProfile(context.sessionID, opts.project)
+                    : undefined;
+                if (meshProfile?.allowedSkills !== undefined && !meshProfile.allowedSkills.includes(skillId)) {
+                  throw new Error(`Skill denied by active role profile: ${skillId}`);
+                }
+                if (opts.respectHostPermissions && typeof ctx.agent?.list === "function") {
+                  let agentName = typeof context?.agent === "string" ? context.agent : context?.agent?.id;
+                  if (!agentName && typeof meshProfile?.agentName === "string" && meshProfile.agentName) {
+                    agentName = meshProfile.agentName;
+                  }
+                  if (!agentName && typeof context?.sessionID === "string" && context.sessionID && typeof ctx.session?.get === "function") {
+                    try {
+                      const info = await boundedLookup(Promise.resolve().then(() => ctx.session?.get?.({ sessionID: context.sessionID! })), 1000);
+                      const infoObj = readObj(info);
+                      const sessionInfo = readObj(infoObj.data ?? info);
+                      if (typeof sessionInfo.agent === "string") agentName = sessionInfo.agent;
+                    } catch {}
+                  }
+                  if (agentName) {
+                    const { policy } = await hostPolicy.forAgent(agentName);
+                    if (policy && hasSkillRules(policy) && skillPermissionDecision(policy, skillId) !== "allow") {
+                      throw new Error(`Skill denied by host agent permissions: ${skillId}`);
+                    }
+                  }
+                }
+              };
+
               editor.add({
                 name: "load",
                 description:
@@ -602,6 +805,7 @@ export function createPlugin() {
                       message: "Use the built-in skill tool for this id. Native permission checks must not be bypassed.",
                     });
                   }
+                  await assertVaultSkillPermitted(id, context, "load vault skills");
                   const sessionID = context?.sessionID;
                   const previously = sessions.loaded(sessionID, id);
                   if (previously && !input.reload) {
@@ -632,8 +836,10 @@ export function createPlugin() {
                 execute: async (input, context) => {
                   abortIfNeeded(context);
                   if (!agentAllowed(opts, context)) throw new Error("Agent not permitted to read vault resources");
-                  const skill = await catalog.get(checkID(input.id));
+                  const id = checkID(input.id);
+                  const skill = await catalog.get(id);
                   if (!skill || skill.scope !== "vault" || !skill.base) throw new Error("Vault skill not found");
+                  await assertVaultSkillPermitted(id, context, "read vault resources");
                   const contents = await safeRead(skill.base, String(input.path ?? ""), opts.maxResourceBytes, skill.root ?? skill.base);
                   abortIfNeeded(context);
                   return {
@@ -658,17 +864,29 @@ export function createPlugin() {
               if (typeof sessionID !== "string" || !sessionID) return;
               const evMeta = readObj(event.metadata);
               const prMeta = readObj(prompt.metadata);
-              const syntheticTurn = event.synthetic === true || isSyntheticMetadata(evMeta, prMeta, sessionID);
-              const lazyMeta = readObj(evMeta.lazySkill);
+              const delegationDispatch = isTaskDelegationDispatch(evMeta, prMeta);
+              const syntheticTurn = !delegationDispatch && (event.synthetic === true || isSyntheticMetadata(evMeta, prMeta, sessionID));
+              const lazyMeta = extractLazyTaskMeta(evMeta, prMeta);
               if (
                 syntheticTurn &&
-                !(Array.isArray(lazyMeta.requiredSkills) && lazyMeta.requiredSkills.length) &&
+                (lazyMeta.requiredSkills === undefined ||
+                  (Array.isArray(lazyMeta.requiredSkills) && lazyMeta.requiredSkills.length === 0)) &&
                 !(opts.bindExplicit && extractExplicit(sourceText, opts.maxPromptChars).length)
               ) {
                 return;
               }
 
+              const turnKey = typeof event.messageID === "string" && event.messageID ? event.messageID : "turn";
+              let turnClaim: ReturnType<typeof claimPromptSkillBinding> | null = peekPromptSkillClaim(
+                sessionID,
+                turnKey,
+                "opencode-lazy-skill-engine"
+              );
+
               let attached = false;
+              let resolvedRoleName: string | undefined;
+              let resolvedPolicy: Awaited<ReturnType<typeof hostPolicy.forAgent>>["policy"] = null;
+              let resolvedMeshProfile: MeshAgentProfile | undefined;
               if (needsBinding) {
                 const requestedRequired = requireSkillIds(lazyMeta.requiredSkills);
                 const alreadyBound = new Set(
@@ -680,10 +898,17 @@ export function createPlugin() {
                 const explicit = extractExplicit(sourceText, opts.maxPromptChars);
                 let sessionInfo: Record<string, unknown> = {};
                 const hasNativeRosterAPI = typeof ctx.agent?.list === "function";
+                const meshProfile = await resolveMeshAgentProfile(sessionID, opts.project);
+                resolvedMeshProfile = meshProfile;
+                const hasMeshOrchestrator = hasMeshCapability("orchestration.task", opts.project) || Boolean(meshProfile);
                 const needSessionLookup =
                   (opts.respectHostPermissions && hasNativeRosterAPI) ||
                   ((opts.autoBind !== "off" || opts.agents.length > 0) &&
-                    (opts.mode !== "single" || Object.keys(opts.roles).length > 0 || opts.agents.length > 0 || opts.semantic.enabled));
+                    (opts.mode !== "single" ||
+                      Object.keys(opts.roles).length > 0 ||
+                      opts.agents.length > 0 ||
+                      opts.semantic.enabled ||
+                      hasMeshOrchestrator));
                 let sessionLookupFailed = false;
                 if (needSessionLookup) {
                   try {
@@ -695,8 +920,20 @@ export function createPlugin() {
                     sessionLookupFailed = true;
                   }
                 }
-                const roleName = typeof sessionInfo.agent === "string" ? sessionInfo.agent : undefined;
-                const isWorker = typeof sessionInfo.parentID === "string" && sessionInfo.parentID.length > 0;
+                const sessionAgent = typeof sessionInfo.agent === "string" ? sessionInfo.agent : undefined;
+                const roleName =
+                  (sessionAgent && opts.roles[sessionAgent] ? sessionAgent : undefined) ??
+                  (typeof meshProfile?.agentName === "string" && meshProfile.agentName ? meshProfile.agentName : undefined) ??
+                  sessionAgent;
+                resolvedRoleName = roleName;
+                const isWorker =
+                  (typeof sessionInfo.parentID === "string" && sessionInfo.parentID.length > 0) ||
+                  Boolean(
+                    meshProfile &&
+                      (meshProfile.access === "read-write" ||
+                        meshProfile.access === "read-only" ||
+                        (meshProfile.access !== "primary" && meshProfile.taskID))
+                  );
                 const all = await catalog.refresh(requiredSkills.length > 0);
                 if (requiredSkills.length && opts.includeNative && !all.nativeReady) {
                   throw new Error("Required skill catalog is unavailable");
@@ -705,12 +942,16 @@ export function createPlugin() {
                 const { roster, policy } = opts.respectHostPermissions
                   ? await hostPolicy.forAgent(roleName)
                   : { roster: null, policy: null };
+                resolvedPolicy = policy;
                 const hostAllowed = hostAllowedIds(opts, available, policy, isWorker, hasNativeRosterAPI);
-                const routing = routeOptions(opts, available, roleName, isWorker, hostAllowed, isOrchestratedRoster(roster));
+                const hostOrchestrated =
+                  isOrchestratedRoster(roster) || hasMeshCapability("orchestration.task", opts.project) || Boolean(meshProfile);
+                const routing = routeOptions(opts, available, roleName, isWorker, hostAllowed, hostOrchestrated, meshProfile);
                 const { role, automaticIds: candidates } = routing;
-                const permittedAuto = routing.autoBind === "all" || (routing.autoBind === "workers" && isWorker);
+                const permittedAuto = !syntheticTurn && (routing.autoBind === "all" || (routing.autoBind === "workers" && isWorker));
                 const existingAttachments = Array.isArray(prompt.skills) && prompt.skills.length > 0;
                 const allowAutomatic =
+                  !syntheticTurn &&
                   !(opts.coexistence === "respect" && existingAttachments) &&
                   !(sessionLookupFailed && opts.respectHostPermissions && hasNativeRosterAPI);
                 const ranked =
@@ -723,7 +964,7 @@ export function createPlugin() {
                   requiredSkills,
                   roleName,
                   role,
-                  autoBind: routing.autoBind,
+                  autoBind: syntheticTurn ? "off" : routing.autoBind,
                   isWorker,
                   projectAutoBind: opts.projectAutoBind,
                   ranked,
@@ -754,9 +995,14 @@ export function createPlugin() {
                   plan = { ...plan, ids: [], source: "none" };
                 }
                 if (plan.source === "explicit") {
+                  const meshAllowed =
+                    !(roleName && opts.roles[roleName]) && meshProfile?.allowedSkills !== undefined
+                      ? new Set(meshProfile.allowedSkills)
+                      : null;
                   plan = {
                     ...plan,
                     ids: plan.ids.filter((id) => {
+                      if (meshAllowed && !meshAllowed.has(id)) return false;
                       const s = all.items.get(id);
                       return s && (s.scope !== "vault" || (opts.vaultAutoBind && (s.origin !== "project" || opts.projectAutoBind)));
                     }),
@@ -766,56 +1012,55 @@ export function createPlugin() {
                   plan = { ...plan, ids: [], source: "none" };
                 }
 
-                const turnKey = typeof event.messageID === "string" && event.messageID ? event.messageID : "turn";
-                let turnClaim: ReturnType<typeof claimPromptSkillBinding> | null = null;
+                const effectiveTaskId =
+                  typeof lazyMeta.taskId === "string" && lazyMeta.taskId
+                    ? lazyMeta.taskId.slice(0, 128)
+                    : typeof meshProfile?.taskID === "string" && meshProfile.taskID
+                      ? meshProfile.taskID.slice(0, 128)
+                      : "";
                 const auto = allowAutomatic && (plan.source === "default" || plan.source === "router" || (plan.source === "none" && permittedAuto));
                 if (auto && opts.semantic.enabled && plan.source !== "router" && candidates.size) {
                   const limit = Math.max(1, Math.min(8, role?.maxActive ?? routing.maxActive));
-                  if (plan.ids.length < limit) {
-                    turnClaim = claimPromptSkillBinding(sessionID, turnKey, "opencode-lazy-skill-engine", plan.ids);
-                    if (turnClaim.claimed) {
-                      const taskID = typeof lazyMeta.taskId === "string" ? lazyMeta.taskId.slice(0, 128) : "";
-                      const saved = taskID ? sessions.getTaskSelection(sessionID, taskID) : undefined;
-                      const infoModel = readObj(sessionInfo.model);
-                      const model =
-                        modelFromString(opts.semantic.model) ||
-                        (typeof infoModel.providerID === "string" && typeof infoModel.id === "string"
-                          ? {
-                              providerID: infoModel.providerID,
-                              id: infoModel.id,
-                              ...(typeof infoModel.variant === "string" && infoModel.variant ? { variant: infoModel.variant } : {}),
-                            }
-                          : undefined);
-                      const additions =
-                        saved ??
-                        (await semantic.select({
-                          promptText: sourceText,
-                          ...(model ? { model } : {}),
-                          sessionID,
-                          taskID,
-                          candidates: available.filter(
-                            (s) => candidates.has(s.id) && !plan.ids.includes(s.id) && !negativeTriggerMatch(sourceText, s)
-                          ),
-                          maxActive: limit - plan.ids.length,
-                        }));
-                      if (taskID && !saved) sessions.setTaskSelection(sessionID, taskID, additions);
-                      if (additions.length) {
-                        const combined = [
-                          ...new Set([
-                            ...plan.ids,
-                            ...additions.filter((x) => candidates.has(x) && !negativeTriggerMatch(sourceText, all.items.get(x))),
-                          ]),
-                        ].slice(0, limit);
-                        plan = { ...plan, ids: combined, source: "semantic" };
-                      }
+                  turnClaim = peekPromptSkillClaim(sessionID, turnKey, "opencode-lazy-skill-engine") ?? turnClaim;
+                  if (plan.ids.length < limit && (!turnClaim || turnClaim.claimed)) {
+                    const saved = effectiveTaskId ? sessions.getTaskSelection(sessionID, effectiveTaskId) : undefined;
+                    const infoModel = readObj(sessionInfo.model);
+                    const model =
+                      modelFromString(opts.semantic.model) ||
+                      (typeof infoModel.providerID === "string" && typeof infoModel.id === "string"
+                        ? {
+                            providerID: infoModel.providerID,
+                            id: infoModel.id,
+                            ...(typeof infoModel.variant === "string" && infoModel.variant ? { variant: infoModel.variant } : {}),
+                          }
+                        : undefined);
+                    const additions =
+                      saved ??
+                      (await semantic.select({
+                        promptText: sourceText,
+                        ...(model ? { model } : {}),
+                        sessionID,
+                        taskID: effectiveTaskId,
+                        candidates: available.filter(
+                          (s) => candidates.has(s.id) && !plan.ids.includes(s.id) && !negativeTriggerMatch(sourceText, s)
+                        ),
+                        maxActive: limit - plan.ids.length,
+                      }));
+                    if (effectiveTaskId && !saved) sessions.setTaskSelection(sessionID, effectiveTaskId, additions);
+                    if (additions.length) {
+                      const combined = [
+                        ...new Set([
+                          ...plan.ids,
+                          ...additions.filter((x) => candidates.has(x) && !negativeTriggerMatch(sourceText, all.items.get(x))),
+                        ]),
+                      ].slice(0, limit);
+                      plan = { ...plan, ids: combined, source: "semantic" };
                     }
                   }
                 }
 
                 if (plan.ids.length) {
-                  if (!turnClaim || plan.source === "semantic") {
-                    turnClaim = claimPromptSkillBinding(sessionID, turnKey, "opencode-lazy-skill-engine", plan.ids);
-                  }
+                  turnClaim = claimPromptSkillBinding(sessionID, turnKey, "opencode-lazy-skill-engine", plan.ids);
                   const effectiveIds = turnClaim.claimed
                     ? plan.ids
                     : plan.source === "explicit" || plan.source === "task"
@@ -838,7 +1083,7 @@ export function createPlugin() {
                       throw new Error("Agent not permitted to auto-bind vault skills");
                     }
                     for (const skill of vault) {
-                      const taskSuffix = typeof lazyMeta.taskId === "string" && lazyMeta.taskId ? `@${lazyMeta.taskId.slice(0, 128)}` : "";
+                      const taskSuffix = effectiveTaskId ? `@${effectiveTaskId}` : "";
                       if (sessions.loaded(sessionID, skill.id + taskSuffix)) continue;
                       const value = await safeRead(skill.base!, basename(skill.path!), opts.maxSkillBytes, skill.root ?? skill.base!);
                       const body = parseFrontmatter(value, opts.maxFrontmatterBytes).body;
@@ -875,7 +1120,7 @@ export function createPlugin() {
                       { owner: "opencode-lazy-skill-engine", kind: "skill-injection", protected: true, synthetic: false },
                       readObj(event.metadata)
                     );
-                    const taskSuffix = typeof lazyMeta.taskId === "string" && lazyMeta.taskId ? `@${lazyMeta.taskId.slice(0, 128)}` : "";
+                    const taskSuffix = effectiveTaskId ? `@${effectiveTaskId}` : "";
                     for (const { skill } of loaded) {
                       sessions.markLoad(sessionID, skill.id + taskSuffix, skill.path!);
                       if (taskSuffix) sessions.markLoad(sessionID, skill.id, skill.path!);
@@ -893,6 +1138,9 @@ export function createPlugin() {
                 }
               }
 
+              if (syntheticTurn) return;
+              turnClaim = peekPromptSkillClaim(sessionID, turnKey, "opencode-lazy-skill-engine") ?? turnClaim;
+              if (turnClaim && !turnClaim.claimed) return;
               if (opts.hints !== "hint" || opts.maxHints <= 0) return;
               if (opts.coexistence === "respect" && Array.isArray(prompt.skills) && prompt.skills.length > 0) return;
               if (
@@ -905,7 +1153,21 @@ export function createPlugin() {
               ) {
                 return;
               }
-              const hits = await catalog.search(text, { topK: Math.min(12, opts.maxResults + 4) });
+              const rawHits = await catalog.search(text, { topK: Math.min(12, opts.maxResults + 4), respectNegativeTriggers: true });
+              const meshAllowedHints =
+                !(resolvedRoleName && opts.roles[resolvedRoleName]) && resolvedMeshProfile?.allowedSkills !== undefined
+                  ? new Set(resolvedMeshProfile.allowedSkills)
+                  : null;
+              const hits = rawHits.filter((h) => {
+                if (meshAllowedHints && !meshAllowedHints.has(h.skill.id)) return false;
+                if (resolvedPolicy && hasSkillRules(resolvedPolicy) && skillPermissionDecision(resolvedPolicy, h.skill.id) !== "allow") {
+                  return false;
+                }
+                if (h.skill.scope === "vault" && opts.agents.length > 0 && resolvedRoleName && !agentAllowed(opts, { agent: resolvedRoleName })) {
+                  return false;
+                }
+                return true;
+              });
               const suggestions = selectHints(text, hits, opts, sessions, sessionID);
               if (!suggestions.length) return;
               const hint = renderHints(suggestions, opts.language, text);

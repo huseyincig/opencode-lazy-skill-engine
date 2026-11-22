@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.1
+
+- Optimize out-of-the-box defaults for balanced skill activation on relevant prompts (`maxAutoSkills: 4`, `vaultAutoBind: true`, `bindExplicit: true`, `hints: "hint"`, `singleAgent: { minScore: 2.5, minCoverage: 0.3, maxActive: 2 }`, while keeping `projectAutoBind: false` for repo safety).
+- Enforce `meshProfile.allowedSkills` and host `ctx.agent.list()` permissions across `lazy_skill_plan`, explicit `skill:<id>` prompt mentions, `lazy_skill_load`, `lazy_skill_resource`, and `<lazy_skill_suggestions>` hints (with `respectNegativeTriggers: true`).
+- Harden mesh turn coordination: prioritize synthetic control markers (`opencode-guardian`, `hi-internal: "silent-reprompt"`, `opencode-mesh.kind: "remediation"`) over stale delegation flags, re-check `peekPromptSkillClaim` after async lookups, and update `src/bridge.ts` to `BRIDGE_REVISION = "2.3.1"`.
+- Add bounded 2500ms RPC timeout and stale in-flight directory-switch guard to `LazySidebar` (`src/tui.tsx`), and skip the 30s cache TTL in `Catalog.refresh()` after transient `ctx.skill.list()` failures.
+- Expand test coverage to **184 / 184** passing tests and align documentation, SVG badge, package keywords, and GitHub repository metadata.
+
 ## 1.5.0
 
 - Migrate the entire codebase to strict TypeScript (`.ts` / `.tsx`) with compiled `dist/` output, declaration files (`.d.ts`), dual-target OpenTUI/Solid emission (`scripts/emit-tui.mjs`), and root entry shims (`index.js`, `tui.js`).

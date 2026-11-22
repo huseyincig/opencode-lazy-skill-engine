@@ -185,7 +185,7 @@ export class Catalog {
       this.index = createSearchIndex(sorted, this.opts.weights);
       this.scanStats = { metadataReads, metadataReuses };
       this.diagnostics = diagnostics.slice(0, 30);
-      this.next = Date.now() + this.opts.refreshMs;
+      this.next = this.nativeReady ? Date.now() + this.opts.refreshMs : 0;
       this.version++;
       return this;
     })();

@@ -8,7 +8,7 @@ const pkgVersion = (() => {
   try {
     return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
   } catch {
-    return "1.5.0";
+    return "1.5.1";
   }
 })();
 
@@ -91,6 +91,7 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
       const loc = resolveLocation();
       const currentDir = loc?.directory;
       const dirChanged = currentDir !== lastDirectory;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const callOpts = currentDir ? { location: loc } : undefined;
         const rpcClient = (
@@ -98,8 +99,13 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
             contract: typeof LAZY_SKILL_STATS_RPC
           ) => { snapshot: (input: Record<string, never>, opts?: { location?: { directory?: string } }) => Promise<LazySkillStatsSnapshot> }
         )(LAZY_SKILL_STATS_RPC);
-        const res = await rpcClient.snapshot({}, callOpts);
-        if (!disposed && res && typeof res === "object") {
+        const res = await Promise.race([
+          rpcClient.snapshot({}, callOpts),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("RPC snapshot timeout")), 2500);
+          }),
+        ]);
+        if (!disposed && res && typeof res === "object" && resolveLocation()?.directory === currentDir) {
           lastDirectory = currentDir;
           setSnapshot(res);
         }
@@ -110,7 +116,11 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
           setSnapshot(null);
         }
       } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
         inflight = null;
+        if (!disposed && resolveLocation()?.directory !== currentDir) {
+          void refresh();
+        }
       }
     })();
     return inflight;
