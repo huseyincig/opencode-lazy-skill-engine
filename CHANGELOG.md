@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.2
+
+- Clean up external sibling repository links in `README.md` in favor of capability-based OpenCode V2 mesh descriptions while preserving all required runtime protocol keys.
+- Verify packed `opencode-lazy-se` artifact loading, live `opencode serve` (`v2.3.2`) session lifecycle, multilingual discovery, conflict detection, symlink/traversal/binary/forged-metadata defenses, and workspace hygiene in an isolated sandbox (`184 / 184` automated tests passing).
+
 ## 1.5.1
 
 - Optimize out-of-the-box defaults for balanced skill activation on relevant prompts (`maxAutoSkills: 4`, `vaultAutoBind: true`, `bindExplicit: true`, `hints: "hint"`, `singleAgent: { minScore: 2.5, minCoverage: 0.3, maxActive: 2 }`, while keeping `projectAutoBind: false` for repo safety).

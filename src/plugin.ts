@@ -446,7 +446,7 @@ export function createPlugin() {
           try {
             return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
           } catch {
-            return "1.5.1";
+            return "1.5.2";
           }
         })();
 
