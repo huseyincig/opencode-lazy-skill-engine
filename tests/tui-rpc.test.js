@@ -64,7 +64,7 @@ test('TUI Finding 1 & 2 & 5 & Runtime: LazySidebar survives unmount/remount, pas
           lastCallOpts = opts;
           return new Promise((resolve) => {
             resolvePendingRpc = () => resolve({
-              version: '1.5.2',
+              version: '1.5.3',
               catalogVersion: 1,
               ready: 'ready',
               skills: 3,

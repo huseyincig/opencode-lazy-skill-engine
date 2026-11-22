@@ -719,3 +719,133 @@ test('Deep Audit 1-5 & 7: lazy_skill_plan mesh parity, mesh/host permission enfo
   assert.ok(!hintEv.prompt.text.includes('forbidden-skill'), 'denied skill must not be hinted');
   assert.ok(!hintEv.prompt.text.includes('vault-secret'), 'negative-triggered or denied vault skill must not be hinted');
 });
+
+test('Evaluation Report Fixes: lazy_skill_plan cross-role preview from primary session, bindReason/outsideRoleAllowed, selectBindings hostAllowed defense-in-depth, search summary matched, and status roleProfiles', async t => {
+  resetMeshStateForTests();
+  const root = await mkdtemp(join(tmpdir(), 'lse-eval-report-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const { selectBindings } = await import('../dist/core/selection.js');
+
+  // 1. selectBindings enforces hostAllowed directly in required and explicit branches
+  const sampleSkills = [
+    { id: 'allowed-s', name: 'Allowed', description: 'Allowed skill', scope: 'native', origin: 'host', keywords: [], aliases: [], tags: [], triggers: [], negativeTriggers: [], roles: [] },
+    { id: 'denied-s', name: 'Denied', description: 'Denied skill', scope: 'native', origin: 'host', keywords: [], aliases: [], tags: [], triggers: [], negativeTriggers: [], roles: [] },
+  ];
+  const hostAllowedSet = new Set(['allowed-s']);
+  const reqDeniedPlan = selectBindings({
+    available: sampleSkills,
+    promptText: 'run task',
+    requiredSkills: ['denied-s'],
+    hostAllowed: hostAllowedSet,
+  });
+  assert.deepEqual(reqDeniedPlan.ids, []);
+  assert.deepEqual(reqDeniedPlan.deniedRequired, ['denied-s']);
+
+  const expDeniedPlan = selectBindings({
+    available: sampleSkills,
+    promptText: 'use skill:denied-s and skill:allowed-s',
+    bindExplicit: true,
+    hostAllowed: hostAllowedSet,
+  });
+  assert.deepEqual(expDeniedPlan.ids, ['allowed-s']);
+
+  // 2. Live setup with configured roles + primary manager meshProfile calling lazy_skill_plan for worker roles
+  const profiles = new Map();
+  const disposeResolver = registerRoleProfileResolver({
+    owner: 'opencode-hi',
+    directory: root,
+    resolve: (sessionID) => profiles.get(sessionID),
+  });
+  t.after(disposeResolver);
+
+  profiles.set('ses-primary-mgr', {
+    sessionID: 'ses-primary-mgr',
+    agentName: 'hi-manager',
+    capability: 'write-allowed',
+    access: 'primary',
+    allowedSkills: ['hi-task-orchestration'],
+    maxActiveSkills: 2,
+    autoBind: 'workers',
+    managedBy: 'opencode-hi',
+  });
+
+  const host = makeHost(
+    root,
+    {
+      mode: 'auto',
+      autoBind: 'adaptive',
+      minAutoScore: 1,
+      roles: {
+        'hi-manager': {
+          default: ['hi-task-orchestration'],
+          allowed: ['hi-task-orchestration', 'hi-deepwork'],
+        },
+        'hi-coder': {
+          default: ['hi-implementation-verification'],
+          allowed: ['hi-implementation-verification', 'opencode-plugin-quality'],
+        },
+        'hi-explorer': {
+          default: ['hi-codebase-investigation'],
+          allowed: ['hi-codebase-investigation'],
+        },
+      },
+    },
+    [
+      { id: 'hi-task-orchestration', name: 'Task Orchestration', description: 'Orchestrate multi-agent tasks' },
+      { id: 'hi-deepwork', name: 'Deepwork', description: 'Deep execution workflow' },
+      { id: 'hi-implementation-verification', name: 'Implementation Verification', description: 'Verify code implementation and tests' },
+      { id: 'opencode-plugin-quality', name: 'Plugin Quality', description: 'Release grade plugin verification and quality audit' },
+      { id: 'hi-codebase-investigation', name: 'Codebase Investigation', description: 'Explore and analyze repository structure' },
+    ]
+  );
+  const cleanup = await createPlugin().setup(host.ctx);
+  t.after(cleanup);
+
+  // Calling plan for hi-manager from ses-primary-mgr -> bindMode: "off", bindReason: "primary_session_off"
+  const mgrPlan = JSON.parse(
+    (await host.tools.get('lazy_skill_plan').execute({ query: 'Orchestrate multi-agent tasks', agent: 'hi-manager' }, { sessionID: 'ses-primary-mgr' })).content
+  );
+  assert.equal(mgrPlan.agent, 'hi-manager');
+  assert.equal(mgrPlan.bindMode, 'off');
+  assert.equal(mgrPlan.bindReason, 'primary_session_off');
+
+  // Calling plan for hi-coder from ses-primary-mgr (without passing worker:true) -> decouples from caller's primary meshProfile!
+  const coderPlan = JSON.parse(
+    (await host.tools.get('lazy_skill_plan').execute({ query: 'Release grade plugin verification and quality audit', agent: 'hi-coder' }, { sessionID: 'ses-primary-mgr' })).content
+  );
+  assert.equal(coderPlan.agent, 'hi-coder');
+  assert.equal(coderPlan.bindMode, 'workers');
+  assert.equal(coderPlan.bindReason, 'bound');
+  assert.ok(coderPlan.ids.includes('opencode-plugin-quality'));
+  assert.deepEqual(coderPlan.outsideRoleAllowed, []);
+
+  // Calling plan for hi-explorer with requiredSkills outside hi-explorer's role.allowed -> reports outsideRoleAllowed
+  const explorerReqPlan = JSON.parse(
+    (
+      await host.tools.get('lazy_skill_plan').execute(
+        { query: 'Explore repository', agent: 'hi-explorer', requiredSkills: ['opencode-plugin-quality'] },
+        { sessionID: 'ses-primary-mgr' }
+      )
+    ).content
+  );
+  assert.deepEqual(explorerReqPlan.ids, ['opencode-plugin-quality']);
+  assert.deepEqual(explorerReqPlan.outsideRoleAllowed, ['opencode-plugin-quality']);
+
+  // 3. lazy_skill_search summary mode includes matched terms
+  const searchSummary = JSON.parse(
+    (await host.tools.get('lazy_skill_search').execute({ query: 'plugin quality audit' }, { sessionID: 'ses-primary-mgr' })).content
+  );
+  assert.equal(searchSummary.detail, 'summary');
+  assert.ok(Array.isArray(searchSummary.results[0]?.matched));
+  assert.ok(searchSummary.results[0].matched.length > 0);
+
+  // 4. lazy_skill_status includes roleProfiles and vaultNote
+  const statusOut = JSON.parse(
+    (await host.tools.get('lazy_skill_status').execute({}, { sessionID: 'ses-primary-mgr' })).content
+  );
+  assert.equal(statusOut.roles, 3);
+  assert.ok(statusOut.roleProfiles?.['hi-coder']);
+  assert.equal(statusOut.roleProfiles['hi-coder'].allowedCount, 2);
+  assert.equal(typeof statusOut.vaultNote, 'string');
+});

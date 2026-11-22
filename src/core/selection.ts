@@ -148,17 +148,24 @@ export function selectBindings({
 
   if (missingRequired.length) return { ids: [], source: "task", missingRequired, missingExplicit, scores: [] };
   if (required.length) {
-    let extra = existExplicit;
+    if (hostAllowed) {
+      const deniedRequired = required.filter((id) => !hostAllowed.has(id));
+      if (deniedRequired.length) {
+        return { ids: [], source: "task", missingRequired, missingExplicit, deniedRequired, scores: [] };
+      }
+    }
+    let extra = hostAllowed ? existExplicit.filter((id) => hostAllowed.has(id)) : existExplicit;
     if (!bindExplicit) {
       const candidates = autoPermitted
         ? automaticCandidates({ available, roleName, role, projectAutoBind, generic, vaultAutoBind, genericAllowed, hostAllowed })
         : new Set<string>();
-      extra = existExplicit.filter((id) => candidates.has(id));
+      extra = extra.filter((id) => candidates.has(id));
     }
     return { ids: uniq([...required, ...extra]), source: "task", missingRequired, missingExplicit, scores: [] };
   }
   if (explicit.length && bindExplicit) {
-    return { ids: existExplicit, source: existExplicit.length ? "explicit" : "none", missingRequired, missingExplicit, scores: [] };
+    const allowedExplicit = hostAllowed ? existExplicit.filter((id) => hostAllowed.has(id)) : existExplicit;
+    return { ids: allowedExplicit, source: allowedExplicit.length ? "explicit" : "none", missingRequired, missingExplicit, scores: [] };
   }
   if (!autoPermitted) return { ids: [], source: "none", missingRequired, missingExplicit, scores: [] };
   const candidateIds = automaticCandidates({

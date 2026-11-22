@@ -446,7 +446,7 @@ export function createPlugin() {
           try {
             return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
           } catch {
-            return "1.5.2";
+            return "1.5.3";
           }
         })();
 
@@ -551,6 +551,7 @@ export function createPlugin() {
                             description: clipped(skill.description, 140),
                             score,
                             coverage,
+                            matched,
                             load: skill.scope === "native" ? "native skill" : "lazy_skill_load",
                           }
                   );
@@ -631,29 +632,40 @@ export function createPlugin() {
                   if (typeof input.query !== "string" || input.query.length > 12000) throw new Error("Invalid task text");
                   const available = [...(await catalog.refresh()).items.values()];
                   abortIfNeeded(context);
-                  const meshProfile =
+                  const targetAgent = typeof input.agent === "string" && input.agent.trim() ? input.agent.trim() : undefined;
+                  const callerMeshProfile =
                     typeof context?.sessionID === "string" && context.sessionID
                       ? await resolveMeshAgentProfile(context.sessionID, opts.project)
                       : undefined;
+                  const meshProfile =
+                    !targetAgent || callerMeshProfile?.agentName === targetAgent ? callerMeshProfile : undefined;
                   const roleName =
-                    (typeof input.agent === "string" && input.agent ? input.agent : undefined) ??
+                    targetAgent ??
                     (typeof meshProfile?.agentName === "string" && meshProfile.agentName ? meshProfile.agentName : undefined);
-                  const isWorker =
-                    typeof input.worker === "boolean"
-                      ? input.worker
-                      : Boolean(
-                          meshProfile &&
-                            (meshProfile.access === "read-write" ||
-                              meshProfile.access === "read-only" ||
-                              (meshProfile.access !== "primary" && meshProfile.taskID))
-                        );
                   const { roster, policy } = opts.respectHostPermissions
                     ? await hostPolicy.forAgent(roleName)
                     : { roster: null, policy: null };
                   abortIfNeeded(context);
+                  const rosterAgent = roleName && Array.isArray(roster) ? roster.find((a) => a.id === roleName) : undefined;
+                  const isWorker =
+                    typeof input.worker === "boolean"
+                      ? input.worker
+                      : meshProfile
+                        ? Boolean(
+                            meshProfile.access === "read-write" ||
+                              meshProfile.access === "read-only" ||
+                              (meshProfile.access !== "primary" && meshProfile.taskID)
+                          )
+                        : rosterAgent?.mode === "subagent"
+                          ? true
+                          : rosterAgent?.mode === "primary"
+                            ? false
+                            : Boolean(targetAgent && opts.roles[targetAgent] && !/manager|primary|coordinator|lead|main/i.test(targetAgent));
                   const hostAllowed = hostAllowedIds(opts, available, policy, isWorker, typeof ctx.agent?.list === "function");
                   const hostOrchestrated =
-                    isOrchestratedRoster(roster) || hasMeshCapability("orchestration.task", opts.project) || Boolean(meshProfile);
+                    isOrchestratedRoster(roster) ||
+                    hasMeshCapability("orchestration.task", opts.project) ||
+                    Boolean(callerMeshProfile);
                   const routing = routeOptions(opts, available, roleName, isWorker, hostAllowed, hostOrchestrated, meshProfile);
                   const candidates = routing.automaticIds;
                   const ranked = candidates.size
@@ -703,11 +715,34 @@ export function createPlugin() {
                       }),
                     };
                   }
+                  const roleAllowedSet =
+                    routing.role && Array.isArray(routing.role.allowed) && routing.role.allowed.length
+                      ? new Set(routing.role.allowed)
+                      : null;
+                  const outsideRoleAllowed = roleAllowedSet ? plan.ids.filter((id) => !roleAllowedSet.has(id)) : [];
+                  const bindReason = plan.deniedRequired?.length
+                    ? "host_permission_denied"
+                    : plan.missingRequired.length
+                      ? "missing_required_skill"
+                      : plan.ids.length > 0
+                        ? "bound"
+                        : routing.autoBind === "off"
+                          ? meshProfile?.access === "primary" || (!isWorker && routing.mode === "orchestrator")
+                            ? "primary_session_off"
+                            : "auto_bind_off"
+                          : routing.autoBind === "workers" && !isWorker
+                            ? "primary_session_off"
+                            : candidates.size === 0
+                              ? "empty_candidate_pool"
+                              : "below_score_or_coverage_threshold";
                   return result({
                     ...plan,
                     agent: roleName ?? null,
+                    worker: isWorker,
                     mode: routing.mode,
                     bindMode: routing.autoBind,
+                    bindReason,
+                    outsideRoleAllowed,
                     vaultAutoBind: opts.vaultAutoBind,
                     semanticSkipped: opts.semantic.enabled,
                     notes: "Preview only; native prompt.skills is authoritative and vault binding needs opt-in.",
@@ -725,14 +760,41 @@ export function createPlugin() {
                   if (input.refresh) await catalog.refresh(true);
                   const st = await catalog.status();
                   abortIfNeeded(context);
+                  const roleProfiles = Object.fromEntries(
+                    Object.entries(opts.roles).map(([rName, rCfg]) => {
+                      const inferredPrimary = /manager|primary|coordinator|lead|main/i.test(rName);
+                      const effectiveBindMode =
+                        opts.autoBind === "off"
+                          ? "off"
+                          : opts.autoBind === "all"
+                            ? "all"
+                            : inferredPrimary
+                              ? "off (primary in workers/adaptive mode)"
+                              : "workers (auto-bind active)";
+                      return [
+                        rName,
+                        {
+                          allowedCount: rCfg.allowed.length,
+                          default: rCfg.default,
+                          maxActive: rCfg.maxActive,
+                          effectiveBindMode,
+                        },
+                      ];
+                    })
+                  );
                   return result({
                     ...st,
+                    vaultNote:
+                      st.vault === 0
+                        ? "No cold-vault skills installed in vault roots; all indexed skills are native (use built-in skill tool)."
+                        : "Cold-vault skills available via lazy_skill_load / lazy_skill_resource.",
                     hints: opts.hints,
                     nativeCatalog: opts.nativeCatalog,
                     autoBind: opts.autoBind,
                     mode: opts.mode,
                     singleAgent: opts.singleAgent,
                     roles: Object.keys(opts.roles).length,
+                    roleProfiles,
                     projectAutoBind: opts.projectAutoBind,
                     vaultAutoBind: opts.vaultAutoBind,
                     semanticEnabled: opts.semantic.enabled,

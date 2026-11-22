@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.3
+
+- Decouple `lazy_skill_plan` target-role previews (`agent: "<role>"`) from the caller session's primary `meshProfile`, infer worker status from host `roster` (`mode: "subagent"`) or configured `roles`, and return `bindReason` (`"bound"`, `"primary_session_off"`, `"below_score_or_coverage_threshold"`, etc.) plus `outsideRoleAllowed`.
+- Enforce `hostAllowed` directly inside `selectBindings()` across `requiredSkills` (`deniedRequired`) and `explicit` (`skill:<id>`) branches as defense-in-depth alongside `plugin.ts` host policy verification.
+- Include `matched` terms in `lazy_skill_search` default `summary` detail mode and add `roleProfiles` (per-role `allowedCount`, `default`, `maxActive`, `effectiveBindMode`) plus `vaultNote` to `lazy_skill_status`.
+- Expand automated verification suite to **185 / 185** passing tests across 13 suites.
+
 ## 1.5.2
 
 - Clean up external sibling repository links in `README.md` in favor of capability-based OpenCode V2 mesh descriptions while preserving all required runtime protocol keys.
