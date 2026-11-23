@@ -1,4 +1,12 @@
 node_modules/
 dist/
 *.tgz
+*.log
 .DS_Store
+.opencode/
+.agents/
+.codex/
+# Local Antigravity/agent instructions and project memory.
+GEMINI.md
+AGENTS.md
+.gemini/
