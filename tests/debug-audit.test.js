@@ -849,3 +849,59 @@ test('Evaluation Report Fixes: lazy_skill_plan cross-role preview from primary s
   assert.equal(statusOut.roleProfiles['hi-coder'].allowedCount, 2);
   assert.equal(typeof statusOut.vaultNote, 'string');
 });
+
+test('OpenCode v2.4.0 alignment: plugin.updated cache invalidation, session.compaction.ended resets vault loads/hints, and structured Tool.Result output', async t => {
+  resetMeshStateForTests();
+  const root = await mkdtemp(join(tmpdir(), 'lse-v240-'));
+  const vaultDir = join(root, 'v240-vault');
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  await mkdir(join(vaultDir, 'vault-guide'), { recursive: true });
+  await writeFile(join(vaultDir, 'vault-guide', 'SKILL.md'), '---\ndescription: Guide for v2.4.0 compaction test\n---\nVault guide body');
+
+  let nativeSkills = [{ id: 'init-skill', name: 'Init', description: 'Initial skill' }];
+  const host = makeHost(
+    root,
+    { roots: [vaultDir], refreshMs: 30000, autoBind: 'all', projectAutoBind: true, singleAgent: { minScore: 1 } },
+    nativeSkills
+  );
+  host.ctx.skill.list = async () => ({ data: nativeSkills });
+
+  const cleanup = await createPlugin().setup(host.ctx);
+  t.after(cleanup);
+
+  // 1. Tool result includes structured `output` object alongside JSON `content`
+  const searchRes = await host.tools.get('lazy_skill_search').execute({ query: 'Initial' }, { sessionID: 'ses-v240' });
+  assert.equal(typeof searchRes.content, 'string');
+  assert.ok(searchRes.output && typeof searchRes.output === 'object', 'Tool.Result must include structured output');
+  assert.equal(searchRes.output.results[0]?.id, 'init-skill');
+
+  // 2. plugin.updated invalidates catalog cache for hot-reloaded plugins
+  nativeSkills = [
+    { id: 'init-skill', name: 'Init', description: 'Initial skill' },
+    { id: 'hot-reloaded-skill', name: 'Hot', description: 'Hot reloaded skill in v2.4.0' },
+  ];
+  host.emit({ type: 'plugin.updated' });
+  await new Promise((r) => setTimeout(r, 15));
+  const afterPluginUpdate = await host.tools.get('lazy_skill_search').execute({ query: 'Hot reloaded' }, { sessionID: 'ses-v240' });
+  assert.equal(afterPluginUpdate.output.results[0]?.id, 'hot-reloaded-skill');
+
+  // 3. session.compaction.ended resets vault loads/hints so vault skills can re-bind after compaction
+  const ev1 = { sessionID: 'ses-compact', prompt: { text: 'Guide for v2.4.0 compaction test', skills: [] } };
+  await host.hooks.get('prompt')(ev1);
+  assert.ok(ev1.prompt.text.includes('<lazy_bound_skill id="vault-guide"'));
+
+  // Before compaction, second turn skips re-injecting already-loaded vault skill
+  const ev2 = { sessionID: 'ses-compact', prompt: { text: 'Guide for v2.4.0 compaction test', skills: [] } };
+  await host.hooks.get('prompt')(ev2);
+  assert.ok(!ev2.prompt.text.includes('<lazy_bound_skill id="vault-guide"'));
+
+  // Emit session.compaction.ended (v2.4.0 durable event shape with data.sessionID)
+  host.emit({ type: 'session.compaction.ended', data: { sessionID: 'ses-compact', reason: 'auto' } });
+  await new Promise((r) => setTimeout(r, 15));
+
+  const ev3 = { sessionID: 'ses-compact', prompt: { text: 'Guide for v2.4.0 compaction test', skills: [] } };
+  await host.hooks.get('prompt')(ev3);
+  assert.ok(ev3.prompt.text.includes('<lazy_bound_skill id="vault-guide"'), 'vault skill should re-bind after session.compaction.ended');
+});

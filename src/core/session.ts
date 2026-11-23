@@ -101,6 +101,13 @@ export class SessionLedger {
     state.semanticTasks.set(task, [...selection]);
   }
 
+  resetCompacted(id: string | undefined): void {
+    const state = this.state(id, false);
+    if (!state) return;
+    state.loads.clear();
+    state.hints.clear();
+  }
+
   delete(id: string | undefined): void {
     if (typeof id === "string" && id) this.states.delete(id);
   }

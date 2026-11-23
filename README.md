@@ -3,8 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/opencode-lazy-se?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/opencode-lazy-se)
 [![npm downloads](https://img.shields.io/npm/dm/opencode-lazy-se?color=blue&logo=npm&logoColor=white)](https://www.npmjs.com/package/opencode-lazy-se)
 [![OpenCode: V2 (>=2.3.0)](https://img.shields.io/badge/OpenCode-V2%20(%3E%3D2.3.0)-10b981?logo=terminal&logoColor=white)](https://opencode.ai)
-[![Host baseline](https://img.shields.io/badge/Host%20baseline-v2.3.2%20verified-10b981?logo=checkmarx&logoColor=white)](docs/QUALITY.md)
-[![Tests: 185/185 Passing](https://img.shields.io/badge/Tests-185%2F185%20Passing-339933?logo=githubactions&logoColor=white)](docs/QUALITY.md)
+[![Host baseline](https://img.shields.io/badge/Host%20baseline-v2.4.0%20verified-10b981?logo=checkmarx&logoColor=white)](docs/QUALITY.md)
+[![Tests: 186/186 Passing](https://img.shields.io/badge/Tests-186%2F186%20Passing-339933?logo=githubactions&logoColor=white)](docs/QUALITY.md)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-339933?logo=nodedotjs&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -21,16 +21,16 @@ It operates 100% standalone without requiring any external orchestrator package,
 
 ![Automated and host acceptance results](docs/assets/verification-overview.svg)
 
-> Lazy Skill Engine **v1.5.3** (`opencode-lazy-se`) was verified on **23 November 2026** against live **OpenCode v2.3.2** on Node **26.13.1**:
+> Lazy Skill Engine **v1.5.4** (`opencode-lazy-se`) was verified on **23 November 2026** against live **OpenCode v2.4.0** on Node **26.13.1**:
 
-- **Unit, Integration & Regression Suite:** **185 / 185** tests passing across 13 test suites (`npm test` / `npm run check`).
+- **Unit, Integration & Regression Suite:** **186 / 186** tests passing across 13 test suites (`npm test` / `npm run check`).
 - **Strict TypeScript & Dual-Target TUI Build:** `tsc --noEmit --noUnusedLocals --noUnusedParameters --noUncheckedIndexedAccess --exactOptionalPropertyTypes` passes with **0 warnings / 0 errors**; `scripts/emit-tui.mjs` verifies dual-target Solid/OpenTUI emission (`dist/tui-runtime.js`, `dist/tui-standalone.js`, `dist/tui.js`) and syntax across all **39** compiled JS modules.
-- **Packed-Artifact Sandbox Verification:** Packed `.tgz` (`npm pack`) installation, live `opencode v2.3.2 serve` startup, `skill.list`, `session.create`/`delete`, adversarial vault/mesh boundary checks, and clean git hygiene pass in an isolated host sandbox.
+- **Packed-Artifact Sandbox Verification:** Packed `.tgz` (`npm pack`) installation, live `opencode` `serve` startup, `skill.list`, `session.create`/`delete`, adversarial vault/mesh boundary checks, and clean git hygiene pass in an isolated host sandbox.
 - **Zero Runtime Dependencies:** Pure TypeScript compiled to `dist/` with `0` third-party runtime dependencies.
 
 Read the detailed [Quality & Verification Matrix](docs/QUALITY.md), [Architecture Guide](docs/ARCHITECTURE.md), and [Standalone & Multi-Plugin Coexistence Guide](docs/COEXISTENCE.md).
 
-See the [1.5.3 release notes](CHANGELOG.md) for cross-role `lazy_skill_plan` preview decoupling (`bindReason`, `outsideRoleAllowed`), `selectBindings()` `hostAllowed` defense-in-depth, `matched` terms in `summary` search results, and `roleProfiles` / `vaultNote` in `lazy_skill_status`.
+See the [1.5.4 release notes](CHANGELOG.md) for **OpenCode v2.4.0** compatibility (`plugin.updated` hot-reload cache invalidation, `session.compaction.ended` vault reload reset, structured `Tool.Result` `output`, `sidebar.content` `{ sessionID }` location tracking, and `@opentui/* >=0.9.4` peer alignment).
 
 ---
 
@@ -49,7 +49,7 @@ See the [1.5.3 release notes](CHANGELOG.md) for cross-role `lazy_skill_plan` pre
 
 ## 📦 Installation
 
-The npm package name is **`opencode-lazy-se`** (internal plugin ID: `opencode-lazy-skill-engine`). Current version: **1.5.3** (OpenCode **v2.3.0+**, verified on **v2.3.2**).
+The npm package name is **`opencode-lazy-se`** (internal plugin ID: `opencode-lazy-skill-engine`). Current version: **1.5.4** (OpenCode **v2.3.0+**, verified on **v2.4.0**).
 
 OpenCode Lazy Skill Engine supports **Global**, **Project-Local**, **`.opencode/plugins/` Local Wrapper / Symlink**, **Local Development (`file://`)**, and **Remote TUI Client (`cli.json`)** installation modes.
 
@@ -76,7 +76,7 @@ Or pass optional inline plugin configuration:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     [
-      "opencode-lazy-se@1.5.3",
+      "opencode-lazy-se@1.5.4",
       {
         "mode": "auto",
         "autoBind": "adaptive",
@@ -196,7 +196,7 @@ OpenCode Lazy Skill Engine includes a dedicated V2 TUI extension (`./tui`) that 
 ### 🔽 Collapsed View (Default)
 
 ```text
-▶ lazy v1.5.3 · ● ready
+▶ lazy v1.5.4 · ● ready
 ```
 
 ### 🔼 Expanded View (Click to Toggle)
@@ -204,7 +204,7 @@ OpenCode Lazy Skill Engine includes a dedicated V2 TUI extension (`./tui`) that 
 Clicking the header toggles the expanded statistics panel:
 
 ```text
-▼ lazy v1.5.3 · ● ready
+▼ lazy v1.5.4 · ● ready
   Skills                               18
   Local                                 6
   Global                               12
@@ -352,7 +352,7 @@ npm run benchmark
 npm pack --dry-run
 ```
 
-- **Quality Matrix:** See [Quality & Verification Matrix](docs/QUALITY.md) for the complete test breakdown (`185 / 185` tests across 13 suites).
+- **Quality Matrix:** See [Quality & Verification Matrix](docs/QUALITY.md) for the complete test breakdown (`186 / 186` tests across 13 suites).
 - **Coexistence Guide:** See [Standalone & Multi-Plugin Coexistence](docs/COEXISTENCE.md).
 - **Architecture Details:** See [Architecture](docs/ARCHITECTURE.md).
 

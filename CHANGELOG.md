@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.4
+
+- Align with **OpenCode v2.4.0** (`@opencode/plugin@2.4.0`, `@opentui/core >=0.9.4`, `@opentui/solid >=0.9.4`):
+  - Subscribe to `plugin.updated` and `session.compaction.ended` in `src/plugin.ts`; invalidate catalog/policy caches on hot-reloaded plugins and reset session `loads`/`hints` via `SessionLedger.resetCompacted()` after compaction so vault skills can re-bind cleanly.
+  - Return structured `output` alongside `content` in `Tool.Result` responses across all `lazy_skill_*` JSON tools.
+  - Update `LazySidebar` (`src/tui.tsx`) to consume `sidebar.content` slot `{ sessionID }` input and resolve `context.data.session.get(sessionID)` and `context.data.location.default()`.
+  - Raise `peerDependencies` `@opentui/core` and `@opentui/solid` floor to `>=0.9.4` and verify against `@opencode/plugin@2.4.0` (`186 / 186` passing tests).
+
 ## 1.5.3
 
 - Decouple `lazy_skill_plan` target-role previews (`agent: "<role>"`) from the caller session's primary `meshProfile`, infer worker status from host `roster` (`mode: "subagent"`) or configured `roles`, and return `bindReason` (`"bound"`, `"primary_session_off"`, `"below_score_or_coverage_threshold"`, etc.) plus `outsideRoleAllowed`.

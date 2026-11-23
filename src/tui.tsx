@@ -8,7 +8,7 @@ const pkgVersion = (() => {
   try {
     return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
   } catch {
-    return "1.5.3";
+    return "1.5.4";
   }
 })();
 
@@ -70,15 +70,26 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
   let disposed = false;
   let inflight: Promise<void> | null = null;
   let lastDirectory: string | undefined;
+  let activeSessionId: string | undefined;
 
   const resolveLocation = (): { directory?: string } | undefined => {
     try {
-      const active =
-        typeof (context.data?.session as { active?: () => { location?: { directory?: string } } } | undefined)?.active ===
-        "function"
-          ? (context.data!.session as unknown as { active: () => { location?: { directory?: string } } }).active()
-          : undefined;
-      return active?.location ?? (context.location as { directory?: string } | undefined);
+      const sessionDomain = context.data?.session as unknown as {
+        get?: (id: string) => { location?: { directory?: string } } | undefined;
+        active?: () => { location?: { directory?: string } } | undefined;
+      } | undefined;
+      if (activeSessionId && typeof sessionDomain?.get === "function") {
+        const s = sessionDomain.get(activeSessionId);
+        if (s?.location?.directory) return s.location;
+      }
+      if (typeof sessionDomain?.active === "function") {
+        const active = sessionDomain.active();
+        if (active?.location?.directory) return active.location;
+      }
+      const dataLoc = (context.data as unknown as { location?: { default?: () => { directory?: string } | undefined } } | undefined)
+        ?.location?.default?.();
+      if (dataLoc?.directory) return dataLoc;
+      return context.location as { directory?: string } | undefined;
     } catch {
       return context.location as { directory?: string } | undefined;
     }
@@ -204,7 +215,13 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
 
   const slotDisposer = context.ui.slot({
     append: "sidebar.content",
-    render: () => <LazySidebar />,
+    render: (input) => {
+      if (typeof input?.sessionID === "string" && input.sessionID !== activeSessionId) {
+        activeSessionId = input.sessionID;
+        void refresh();
+      }
+      return <LazySidebar />;
+    },
   });
   cleanups.push(typeof slotDisposer === "function" ? slotDisposer : undefined);
   void refresh();

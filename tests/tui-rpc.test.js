@@ -64,7 +64,7 @@ test('TUI Finding 1 & 2 & 5 & Runtime: LazySidebar survives unmount/remount, pas
           lastCallOpts = opts;
           return new Promise((resolve) => {
             resolvePendingRpc = () => resolve({
-              version: '1.5.3',
+              version: '1.5.4',
               catalogVersion: 1,
               ready: 'ready',
               skills: 3,
@@ -101,6 +101,8 @@ test('TUI Finding 1 & 2 & 5 & Runtime: LazySidebar survives unmount/remount, pas
   assert.match(src, /dirChanged[\s\S]*setSnapshot\(null\)/, 'TUI should reset stale snapshot when directory changes and RPC fails');
   assert.match(src, /Promise\.race[\s\S]*2500[\s\S]*clearTimeout/, 'TUI RPC snapshot call should use a bounded 2500ms timeout with clearTimeout');
   assert.match(src, /resolveLocation\(\)\?\.directory === currentDir/, 'TUI should guard against stale in-flight RPC responses after directory switch');
+  assert.match(src, /location\?\.default/, 'TUI should resolve v2.4.0 context.data.location.default()');
+  assert.match(src, /render:\s*\(input\)/, 'TUI sidebar.content slot should accept v2.4.0 { sessionID } input');
 
   // Cleanup must clear slot and unsubscribe events, and stop future refreshes
   cleanup();

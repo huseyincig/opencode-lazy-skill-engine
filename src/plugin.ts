@@ -40,7 +40,7 @@ const objectInput = (properties: Record<string, unknown>, required: string[]) =>
 const str = (description: string) => ({ type: "string", description });
 const bool = (description: string) => ({ type: "boolean", description });
 const integer = (description: string) => ({ type: "integer", minimum: 1, maximum: 30, description });
-const result = (data: unknown) => ({ content: JSON.stringify(data) });
+const result = <T>(data: T) => ({ content: JSON.stringify(data), output: data });
 
 function publicSkill(skill: SkillEntry) {
   return {
@@ -412,7 +412,7 @@ export function createPlugin() {
 
         if (typeof ctx.event?.subscribe === "function") {
           const stream = ctx.event.subscribe({
-            types: ["skill.updated", "agent.updated", "session.deleted"],
+            types: ["skill.updated", "agent.updated", "plugin.updated", "session.deleted", "session.compaction.ended"],
             signal: eventAbort.signal,
           });
           if (stream && typeof stream[Symbol.asyncIterator] === "function") {
@@ -422,7 +422,10 @@ export function createPlugin() {
                   if (disposed) break;
                   if (ev?.type === "skill.updated") catalog.invalidate();
                   else if (ev?.type === "agent.updated") hostPolicy.clear();
-                  else if (ev?.type === "session.deleted") {
+                  else if (ev?.type === "plugin.updated") {
+                    catalog.invalidate();
+                    hostPolicy.clear();
+                  } else if (ev?.type === "session.compaction.ended" || ev?.type === "session.deleted") {
                     const sid =
                       ev?.properties?.info?.id ??
                       ev?.properties?.sessionID ??
@@ -432,8 +435,12 @@ export function createPlugin() {
                       ev?.data?.id ??
                       ev?.sessionID;
                     if (typeof sid === "string" && sid) {
-                      sessions.delete(sid);
-                      forgetMeshSession(sid);
+                      if (ev.type === "session.compaction.ended") {
+                        sessions.resetCompacted(sid);
+                      } else {
+                        sessions.delete(sid);
+                        forgetMeshSession(sid);
+                      }
                     }
                   }
                 }
@@ -446,7 +453,7 @@ export function createPlugin() {
           try {
             return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
           } catch {
-            return "1.5.3";
+            return "1.5.4";
           }
         })();
 
