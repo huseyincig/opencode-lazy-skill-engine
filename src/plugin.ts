@@ -141,6 +141,8 @@ const PLAN_OUTPUT_SCHEMA = {
     worker: { type: "boolean" },
     mode: { type: "string", enum: ["single", "orchestrator"] },
     bindMode: { type: "string", enum: ["off", "workers", "all"] },
+    baselineMode: { type: "string", enum: ["always", "fallback"] },
+    bindingOwner: { type: ["string", "null"], enum: ["self", "external", null] },
     bindReason: { type: "string" },
     outsideRoleAllowed: { type: "array", items: { type: "string" } },
     vaultAutoBind: { type: "boolean" },
@@ -203,6 +205,7 @@ const STATUS_OUTPUT_SCHEMA = {
     hints: { type: "string", enum: ["off", "hint"] },
     nativeCatalog: { type: "string", enum: ["preserve", "compact", "hide"] },
     autoBind: { type: "string", enum: ["off", "workers", "all", "adaptive"] },
+    baselineMode: { type: "string", enum: ["adaptive", "always", "fallback"] },
     mode: { type: "string", enum: ["auto", "single", "orchestrator"] },
     singleAgent: {
       type: "object",
@@ -451,6 +454,7 @@ async function boundedLookup<T>(promise: Promise<T>, ms = 1000): Promise<T | und
       promise,
       new Promise<undefined>((resolve) => {
         timer = setTimeout(() => resolve(undefined), ms);
+        timer.unref?.();
       }),
     ]);
   } finally {
@@ -699,7 +703,7 @@ export function createPlugin() {
           try {
             return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
           } catch {
-            return "1.7.1";
+            return "1.7.2";
           }
         })();
 
@@ -953,23 +957,30 @@ export function createPlugin() {
                   if (policy && hasSkillRules(policy)) {
                     const forbiddenRequired = requiredList.filter((id) => skillPermissionDecision(policy, id) !== "allow");
                     if (forbiddenRequired.length) plan = { ...plan, ids: [], deniedRequired: forbiddenRequired };
-                    else plan = { ...plan, ids: plan.ids.filter((id) => skillPermissionDecision(policy, id) === "allow") };
+                    else {
+                      const allowedIds = plan.ids.filter((id) => skillPermissionDecision(policy, id) === "allow");
+                      plan = { ...plan, ids: allowedIds, source: allowedIds.length ? plan.source : "none" };
+                    }
                   }
                   if (isWorker && opts.respectHostPermissions && typeof ctx.agent?.list === "function" && !policy && plan.source === "explicit") {
                     plan = { ...plan, ids: [], source: "none" };
                   }
-                  if (plan.source === "explicit") {
+                  if (plan.source === "explicit" || plan.source === "task") {
+                    const requiredSet = new Set(requiredList);
                     const meshAllowed =
                       !(roleName && opts.roles[roleName]) && meshProfile?.allowedSkills !== undefined
                         ? new Set(meshProfile.allowedSkills)
                         : null;
+                    const filteredIds = plan.ids.filter((id) => {
+                      if (plan.source === "task" && requiredSet.has(id)) return true;
+                      if (meshAllowed && !meshAllowed.has(id)) return false;
+                      const s = available.find((x) => x.id === id);
+                      return Boolean(s && (s.scope !== "vault" || (opts.vaultAutoBind && (s.origin !== "project" || opts.projectAutoBind))));
+                    });
                     plan = {
                       ...plan,
-                      ids: plan.ids.filter((id) => {
-                        if (meshAllowed && !meshAllowed.has(id)) return false;
-                        const s = available.find((x) => x.id === id);
-                        return s && (s.scope !== "vault" || (opts.vaultAutoBind && (s.origin !== "project" || opts.projectAutoBind)));
-                      }),
+                      ids: filteredIds,
+                      source: filteredIds.length || plan.deniedRequired?.length || plan.missingRequired.length ? plan.source : "none",
                     };
                   }
                   const roleAllowedSet =
@@ -983,21 +994,25 @@ export function createPlugin() {
                       ? "missing_required_skill"
                       : plan.ids.length > 0
                         ? "bound"
-                        : routing.autoBind === "off"
-                          ? meshProfile?.access === "primary" || (!isWorker && routing.mode === "orchestrator")
-                            ? "primary_session_off"
-                            : "auto_bind_off"
-                          : routing.autoBind === "workers" && !isWorker
-                            ? "primary_session_off"
-                            : candidates.size === 0
-                              ? "empty_candidate_pool"
-                              : "below_score_or_coverage_threshold";
+                        : routing.bindingOwner === "self"
+                          ? "binding_owned_by_peer"
+                          : routing.autoBind === "off"
+                            ? meshProfile?.access === "primary" || (!isWorker && routing.mode === "orchestrator")
+                              ? "primary_session_off"
+                              : "auto_bind_off"
+                            : routing.autoBind === "workers" && !isWorker
+                              ? "primary_session_off"
+                              : candidates.size === 0
+                                ? "empty_candidate_pool"
+                                : "below_score_or_coverage_threshold";
                   return result({
                     ...plan,
                     agent: roleName ?? null,
                     worker: isWorker,
                     mode: routing.mode,
                     bindMode: routing.autoBind,
+                    baselineMode: routing.baselineMode,
+                    bindingOwner: routing.bindingOwner ?? null,
                     bindReason,
                     outsideRoleAllowed,
                     vaultAutoBind: opts.vaultAutoBind,
@@ -1049,6 +1064,7 @@ export function createPlugin() {
                     hints: opts.hints,
                     nativeCatalog: opts.nativeCatalog,
                     autoBind: opts.autoBind,
+                    baselineMode: opts.baselineMode,
                     mode: opts.mode,
                     singleAgent: opts.singleAgent,
                     roles: Object.keys(opts.roles).length,
@@ -1315,24 +1331,25 @@ export function createPlugin() {
                   if (forbiddenRequired.length) {
                     throw new Error("Required skill denied by host agent permissions: " + forbiddenRequired.join(", "));
                   }
-                  plan = { ...plan, ids: plan.ids.filter((id) => skillPermissionDecision(policy, id) === "allow") };
+                  const allowedIds = plan.ids.filter((id) => skillPermissionDecision(policy, id) === "allow");
+                  plan = { ...plan, ids: allowedIds, source: allowedIds.length ? plan.source : "none" };
                 }
                 if (isWorker && opts.respectHostPermissions && hasNativeRosterAPI && !policy && plan.source === "explicit") {
                   plan = { ...plan, ids: [], source: "none" };
                 }
-                if (plan.source === "explicit") {
+                if (plan.source === "explicit" || plan.source === "task") {
+                  const requiredSet = new Set(requiredSkills);
                   const meshAllowed =
                     !(roleName && opts.roles[roleName]) && meshProfile?.allowedSkills !== undefined
                       ? new Set(meshProfile.allowedSkills)
                       : null;
-                  plan = {
-                    ...plan,
-                    ids: plan.ids.filter((id) => {
-                      if (meshAllowed && !meshAllowed.has(id)) return false;
-                      const s = all.items.get(id);
-                      return s && (s.scope !== "vault" || (opts.vaultAutoBind && (s.origin !== "project" || opts.projectAutoBind)));
-                    }),
-                  };
+                  const filteredIds = plan.ids.filter((id) => {
+                    if (plan.source === "task" && requiredSet.has(id)) return true;
+                    if (meshAllowed && !meshAllowed.has(id)) return false;
+                    const s = all.items.get(id);
+                    return Boolean(s && (s.scope !== "vault" || (opts.vaultAutoBind && (s.origin !== "project" || opts.projectAutoBind))));
+                  });
+                  plan = { ...plan, ids: filteredIds, source: filteredIds.length ? plan.source : "none" };
                 }
                 if (!allowAutomatic && plan.source !== "explicit" && plan.source !== "task") {
                   plan = { ...plan, ids: [], source: "none" };

@@ -1,5 +1,5 @@
 import { readdir, lstat, realpath } from "node:fs/promises";
-import { constants as fsConstants, lstatSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
+import { constants as fsConstants, fstatSync, lstatSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { inside, peekMetadata, safeRead } from "./security.js";
@@ -405,7 +405,9 @@ export function readSidecarSync(skillDir: string, maxBytes = 8192): SidecarMeta 
       if (!inside(canonicalBase, canonicalFile)) continue;
       const fd = openSync(canonicalFile, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
       try {
-        const buf = Buffer.allocUnsafe(st.size + 1);
+        const fst = fstatSync(fd);
+        if (!fst.isFile() || fst.size > maxBytes) continue;
+        const buf = Buffer.allocUnsafe(Math.min(fst.size, maxBytes) + 1);
         let n = 0;
         while (n < buf.length) {
           const got = readSync(fd, buf, n, buf.length - n, n);

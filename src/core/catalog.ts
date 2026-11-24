@@ -189,6 +189,7 @@ export class Catalog {
   public items = new Map<string, SkillEntry>();
   public next = 0;
   private inflight: Promise<this> | null = null;
+  private invalidationGen = 0;
   public diagnostics: ScanDiagnostic[] = [];
   public version = 0;
   private fingerprint = "";
@@ -206,6 +207,7 @@ export class Catalog {
   }
 
   invalidate(): void {
+    this.invalidationGen++;
     this.next = 0;
   }
 
@@ -214,9 +216,10 @@ export class Catalog {
     if (!force && this.next > now) return this;
     if (this.inflight) {
       await this.inflight;
-      if (!force) return this;
+      if (!force && this.next > Date.now()) return this;
     }
-    this.inflight = (async () => {
+    const startGen = this.invalidationGen;
+    const run = (async () => {
       const { skills: vault, conflictIds: vaultConflicts = [], diagnostics, metadataReads, metadataReuses } = await scanVaults(
         this.opts,
         this.metaCache,
@@ -273,13 +276,14 @@ export class Catalog {
       }
       this.scanStats = { metadataReads, metadataReuses };
       this.diagnostics = diagnostics.slice(0, 30);
-      this.next = this.nativeReady ? Date.now() + this.opts.refreshMs : 0;
+      this.next = this.nativeReady && this.invalidationGen === startGen ? Date.now() + this.opts.refreshMs : 0;
       return this;
     })();
+    this.inflight = run;
     try {
-      return await this.inflight;
+      return await run;
     } finally {
-      this.inflight = null;
+      if (this.inflight === run) this.inflight = null;
     }
   }
 

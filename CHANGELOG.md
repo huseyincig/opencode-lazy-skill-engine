@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.7.2
+
+- **Security Hardening (`src/plugin.ts`, `src/core/scanner.ts`):**
+  - Enforce `projectAutoBind: false`, `vaultAutoBind`, and `meshProfile.allowedSkills` on explicit `skill:<id>` prompt mentions even when `requiredSkills` is also present (`source: "task"`), preventing untrusted repository `.opencode/skill-vault` content or out-of-role skills from bypassing policy in both `session.hook("prompt")` and `lazy_skill_plan`; normalize `plan.source` to `"none"` when post-filtering empties `plan.ids`.
+  - Add post-open `fstatSync(fd)` size and regular-file verification to `readSidecarSync()` (`src/core/scanner.ts`), eliminating the `lstatSync` -> `openSync` TOCTOU window.
+- **Concurrency & Cache Consistency (`src/core/host-policy.ts`, `src/core/catalog.ts`):**
+  - Guard `HostSkillPolicy.list()` with a monotonic `generation` counter incremented by `clear()` so stale pre-update in-flight `ctx.agent.list()` resolutions never overwrite fresher permission rosters or clobber newer pending calls.
+  - Guard `Catalog.refresh()` with an `invalidationGen` counter incremented by `invalidate()` so mid-flight `skill.updated` / `plugin.updated` invalidations never get masked by a stale 30s TTL cache.
+- **Plan/Status Parity & Timer Hygiene (`src/plugin.ts`, `src/tui.tsx`, `src/core/semantic.ts`, `README.md`):**
+  - Report `bindReason: "binding_owned_by_peer"`, `bindingOwner`, and `baselineMode` from `lazy_skill_plan`, expose `baselineMode` in `lazy_skill_status`, and declare matching properties in `PLAN_OUTPUT_SCHEMA` and `STATUS_OUTPUT_SCHEMA`.
+  - Call `.unref?.()` on bounded timeout timers in `boundedLookup`, `HostSkillPolicy.list`, `SemanticRouter.select`, and `LazySidebar` RPC calls; align `README.md` TUI sidebar default view documentation (`Expanded View (Default)`).
+- **Verification:**
+  - Add `tests/deep-audit-fixes.test.js` (5 security, concurrency, TOCTOU, and parity regression tests) expanding the suite to **217 / 217** passing tests across 17 suites (`43 / 43` JS modules, `0` strict typecheck errors against `@opencode/plugin@2.4.1`, `0` audit vulnerabilities).
+
 ## 1.7.1
 
 - **Idle Performance & Zero-Waste Polling (`src/core/catalog.ts`, `src/tui.tsx`):**

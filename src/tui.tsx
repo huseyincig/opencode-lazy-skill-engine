@@ -8,7 +8,7 @@ const pkgVersion = (() => {
   try {
     return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
   } catch {
-    return "1.7.1";
+    return "1.7.2";
   }
 })();
 
@@ -154,6 +154,7 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
           rpcClient.snapshot({}, callOpts),
           new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error("RPC snapshot timeout")), 2500);
+            timeoutId.unref?.();
           }),
         ]);
         if (!disposed && res && typeof res === "object" && resolveLocation()?.directory === currentDir) {

@@ -100,6 +100,7 @@ export class HostSkillPolicy {
   private until = 0;
   private roster: AgentInfo[] | null = null;
   private pending: Promise<AgentInfo[] | null> | null = null;
+  private generation = 0;
 
   constructor(agentDomain?: AgentDomainLike, ttl = 3000) {
     this.domain = agentDomain;
@@ -111,28 +112,37 @@ export class HostSkillPolicy {
     if (Date.now() < this.until) return this.roster;
     if (this.pending) return this.pending;
     const listFn = this.domain.list.bind(this.domain);
-    this.pending = (async () => {
+    const gen = this.generation;
+    const run = (async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const result = await Promise.race([
           Promise.resolve().then(() => listFn()),
           new Promise<undefined>((resolve) => {
             timer = setTimeout(() => resolve(undefined), 900);
+            timer.unref?.();
           }),
         ]);
-        this.roster = normalizeAgentList(result);
-        this.until = Date.now() + this.ttl;
+        const normalized = normalizeAgentList(result);
+        if (gen === this.generation) {
+          this.roster = normalized;
+          this.until = Date.now() + this.ttl;
+        }
+        return normalized;
       } catch {
-        this.until = Date.now() + Math.min(this.ttl, 500);
+        if (gen === this.generation) {
+          this.until = Date.now() + Math.min(this.ttl, 500);
+        }
+        return gen === this.generation ? this.roster : null;
       } finally {
         if (timer !== undefined) clearTimeout(timer);
       }
-      return this.roster;
     })();
+    this.pending = run;
     try {
-      return await this.pending;
+      return await run;
     } finally {
-      this.pending = null;
+      if (this.pending === run) this.pending = null;
     }
   }
 
@@ -144,6 +154,7 @@ export class HostSkillPolicy {
   }
 
   clear(): void {
+    this.generation++;
     this.roster = null;
     this.until = 0;
     this.pending = null;

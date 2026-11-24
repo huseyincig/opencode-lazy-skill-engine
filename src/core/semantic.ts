@@ -112,6 +112,7 @@ export class SemanticRouter {
         Promise.resolve().then(() => gen({ model, prompt, maxTokens: 160, temperature: 0 })),
         new Promise<undefined>((_, reject) => {
           alarm = setTimeout(() => reject(new Error("semantic deadline")), ms);
+          alarm.unref?.();
         }),
       ]);
       selected = parseSemanticIDs(r?.text, allowed, limit);
