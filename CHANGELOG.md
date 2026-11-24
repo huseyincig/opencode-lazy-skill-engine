@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.0
+
+- **Adaptive Role Baseline Binding (`baselineMode`) (`src/core/config.ts`, `src/core/selection.ts`, `src/plugin.ts`):**
+  - Add `baselineMode: "adaptive" | "always" | "fallback"` (default `"adaptive"`) and `resolveBaselineMode()`.
+  - Under `"adaptive"`, standalone and non-orchestrated setups retain legacy `"fallback"` (either-or: lexical router wins, else `role.default`), while mesh-managed profiles (`bindingOwner: "self" | "external"` or `managedBy: "opencode-hi"`) automatically resolve to `"always"`: safe non-project `role.default` baseline skills bind first (still enforcing `candidateIds`, `hostAllowed`, `role.allowed`, and `negativeTriggers`) and lexical/semantic routing fills remaining slots up to `maxActive`.
+- **Explicit Mesh Binding Ownership (`bindingOwner`) (`src/bridge.ts`, `src/plugin.ts`):**
+  - Add `MeshAgentProfile.bindingOwner?: "self" | "external"` to `src/bridge.ts`.
+  - When a mesh orchestrator declares `bindingOwner: "self"`, automatic binding is suppressed (`autoBind = "off"`) even under `autoBind: "all"`, while explicit `skill:<id>` and `requiredSkills` remain honored; `bindingOwner: "external"` permits Lazy automatic binding; unknown wire values are ignored safely.
+- **Verification:**
+  - Add `tests/baseline-mode.test.js` (11 unit & mesh-integration tests) expanding the suite to **210 / 210** passing tests across 16 suites (`42 / 42` JS modules, `0` strict typecheck errors against `@opencode/plugin@2.4.1`).
+
 ## 1.6.1
 
 - **Fix OpenCode V2.4.x Tool `output` Schema Contract (`src/plugin.ts`):**

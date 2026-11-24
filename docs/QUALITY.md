@@ -14,9 +14,10 @@ Target runtime: OpenCode V2 Promise server plugin. Local verification uses `node
 | Host-neutral orchestration, stemming & YAML hardening | `tests/host-hardening.test.js` | PASS (Local) |
 | OpenCode V2.4.1 contract alignment, tool `output` schemas, compaction reset & hot-reload | `tests/tool-output-schema.test.js`, `tests/v232-audit.test.js`, `tests/debug-audit.test.js` | PASS (Local) |
 | Strict `name + description` scoring, bounded extraction, sidecar security & TR→EN concepts | `tests/strict-frontmatter.test.js` | PASS (Local) |
+| Adaptive role baseline (`baselineMode`) & mesh `bindingOwner` handoff | `tests/baseline-mode.test.js` | PASS (Local) |
 | Mesh bridge provenance, rollback, YAML/stemming & session cleanup | `tests/debug-audit.test.js` | PASS (Local) |
 | TUI sidebar lifecycle, RPC schema & conflict detection | `tests/tui-rpc.test.js` | PASS (Local) |
-| Syntax & full unit test suite (199 tests / 15 files) | `npm run check` | PASS (Local) |
+| Syntax & full unit test suite (210 tests / 16 files) | `npm run check` | PASS (Local) |
 | Package tarball surface | `npm pack --dry-run` | PASS (Local) |
 | Sandbox OpenCode V2.4.1 live host tool load & execution | `opencode v2.4.1 --standalone` isolated probe across all 6 `lazy_skill_*` tools (`hasOutputSchema: true`) | PASS (Isolated sandbox) |
 | Multi-plugin live load order & multi-turn sessions | Multi-plugin live host session | **NOT_RUN** |

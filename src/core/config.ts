@@ -33,6 +33,7 @@ export interface LazySkillOptions {
   readonly respectHostPermissions: boolean;
   readonly searchDetail: "ids" | "summary" | "full";
   readonly autoBind: "off" | "workers" | "all" | "adaptive";
+  readonly baselineMode: "adaptive" | "always" | "fallback";
   readonly mode: "auto" | "single" | "orchestrator";
   readonly singleAgent: SingleAgentConfig;
   readonly roles: Record<string, RoleConfig>;
@@ -152,6 +153,8 @@ export function configure(options: unknown = {}, location: unknown = {}): LazySk
       options.autoBind === "off" || options.autoBind === "workers" || options.autoBind === "all"
         ? options.autoBind
         : "adaptive",
+    baselineMode:
+      options.baselineMode === "always" || options.baselineMode === "fallback" ? options.baselineMode : "adaptive",
     mode: options.mode === "single" || options.mode === "orchestrator" ? options.mode : "auto",
     singleAgent: Object.freeze({
       allowed: cleanIds(single.allowed),

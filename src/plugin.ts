@@ -10,7 +10,7 @@ import { listResources } from "./core/resources.js";
 import { selectHints, renderHints } from "./core/hint.js";
 import { clipped, detectLanguage, xmlEscape } from "./core/text.js";
 import { LANGUAGES, CONCEPT_COUNT } from "./core/concepts.js";
-import { selectBindings, automaticCandidates, extractExplicit, negativeTriggerMatch } from "./core/selection.js";
+import { selectBindings, resolveBaselineMode, automaticCandidates, extractExplicit, negativeTriggerMatch } from "./core/selection.js";
 import { SemanticRouter, modelFromString, type SemanticGenerator } from "./core/semantic.js";
 import { HostSkillPolicy, hasSkillRules, isOrchestratedRoster, skillPermissionDecision, type AgentDomainLike } from "./core/host-policy.js";
 import {
@@ -510,6 +510,11 @@ function routeOptions(
       autoBind = meshProfile.autoBind;
     }
   }
+  // Unknown wire values are treated as absent and never grant permission.
+  const bindingOwner: "self" | "external" | undefined =
+    meshProfile?.bindingOwner === "self" || meshProfile?.bindingOwner === "external" ? meshProfile.bindingOwner : undefined;
+  if (bindingOwner === "self") autoBind = "off";
+  const baselineMode = resolveBaselineMode(opts.baselineMode, bindingOwner ? { ...meshProfile, bindingOwner } : meshProfile);
   const configuredRole = roleName ? opts.roles[roleName] : undefined;
   const meshRole: RoleConfig | undefined =
     !configuredRole && meshProfile?.allowedSkills !== undefined
@@ -525,6 +530,8 @@ function routeOptions(
   return {
     mode,
     autoBind,
+    baselineMode,
+    bindingOwner,
     role,
     roleName,
     isWorker,
@@ -692,7 +699,7 @@ export function createPlugin() {
           try {
             return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
           } catch {
-            return "1.6.1";
+            return "1.7.0";
           }
         })();
 
@@ -941,6 +948,7 @@ export function createPlugin() {
                     hostAllowed,
                     maxPromptChars: opts.maxPromptChars,
                     bindExplicit: opts.bindExplicit,
+                    baselineMode: routing.baselineMode,
                   });
                   if (policy && hasSkillRules(policy)) {
                     const forbiddenRequired = requiredList.filter((id) => skillPermissionDecision(policy, id) !== "allow");
@@ -1294,6 +1302,7 @@ export function createPlugin() {
                   hostAllowed,
                   maxPromptChars: opts.maxPromptChars,
                   bindExplicit: opts.bindExplicit,
+                  baselineMode: routing.baselineMode,
                 });
                 if (plan.missingRequired.length) {
                   throw new Error("Required skill is missing from active catalog: " + plan.missingRequired.join(", "));
@@ -1336,7 +1345,7 @@ export function createPlugin() {
                       ? meshProfile.taskID.slice(0, 128)
                       : "";
                 const auto = allowAutomatic && (plan.source === "default" || plan.source === "router" || (plan.source === "none" && permittedAuto));
-                if (auto && opts.semantic.enabled && plan.source !== "router" && candidates.size) {
+                if (auto && opts.semantic.enabled && (plan.source !== "router" || routing.baselineMode === "always") && candidates.size) {
                   const limit = Math.max(1, Math.min(8, role?.maxActive ?? routing.maxActive));
                   turnClaim = peekPromptSkillClaim(sessionID, turnKey, "opencode-lazy-skill-engine") ?? turnClaim;
                   if (plan.ids.length < limit && (!turnClaim || turnClaim.claimed)) {

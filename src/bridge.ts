@@ -130,6 +130,8 @@ export interface MeshAgentProfile {
   defaultSkills?: readonly string[] | undefined;
   maxActiveSkills?: number | undefined;
   autoBind?: "off" | "workers" | "all" | undefined;
+  /** Who owns automatic skill binding: "external" permits Lazy binding, "self" suppresses it. Unknown values are ignored. */
+  bindingOwner?: "self" | "external" | undefined;
   managedBy: string;
 }
 

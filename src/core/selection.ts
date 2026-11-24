@@ -7,6 +7,22 @@ import type { SearchHit } from "./rank.js";
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const BIND_MODES = new Set(["off", "workers", "all"]);
 const DEFAULT_MAX = 3;
+
+export type BaselineMode = "adaptive" | "always" | "fallback";
+export type EffectiveBaselineMode = "always" | "fallback";
+
+/** Resolve `adaptive` against the mesh profile. Direct callers without a profile get legacy `fallback`. */
+export function resolveBaselineMode(
+  mode: unknown,
+  profile?: { bindingOwner?: unknown; managedBy?: unknown } | null
+): EffectiveBaselineMode {
+  if (mode === "always") return "always";
+  if (mode === "fallback") return "fallback";
+  if (mode !== "adaptive") return "fallback";
+  const hiManaged =
+    profile?.bindingOwner === "self" || profile?.bindingOwner === "external" || profile?.managedBy === "opencode-hi";
+  return hiManaged ? "always" : "fallback";
+}
 const ORIGIN_BONUS: Record<string, number> = { project: 1.08, global: 1.03, bundled: 1, host: 1 };
 const uniq = (x: string[]): string[] => [...new Set(x)];
 const idList = (x: unknown): string[] =>
@@ -117,6 +133,8 @@ export function selectBindings({
   minCoverage = 0,
   maxPromptChars = 12000,
   bindExplicit = true,
+  baselineMode = "fallback",
+  meshProfile,
 }: {
   available?: SkillEntry[];
   promptText?: string;
@@ -136,6 +154,8 @@ export function selectBindings({
   minCoverage?: number;
   maxPromptChars?: number;
   bindExplicit?: boolean;
+  baselineMode?: BaselineMode;
+  meshProfile?: { bindingOwner?: unknown; managedBy?: unknown } | undefined;
 } = {}): BindingPlan {
   const byId = new Map(available.map((s) => [s.id, s]));
   const required = idList(requiredSkills);
@@ -194,6 +214,22 @@ export function selectBindings({
       origin: h.skill.origin,
     }));
   scored.sort((a, b) => b.score - a.score || b.coverage - a.coverage || a.id.localeCompare(b.id));
+  if (resolveBaselineMode(baselineMode, meshProfile) === "always") {
+    const base = idList(role?.default)
+      .filter((id) => {
+        const s = byId.get(id);
+        return candidateIds.has(id) && !!s && s.origin !== "project" && !negativeTriggerMatch(promptText, s);
+      })
+      .slice(0, limit);
+    const baseSet = new Set(base);
+    const fill = scored
+      .filter((h) => h.raw >= minScore && h.coverage >= minCoverage && !baseSet.has(h.id))
+      .slice(0, Math.max(0, limit - base.length))
+      .map((h) => h.id);
+    const ids = [...base, ...fill];
+    const source = fill.length ? "router" : base.length ? "default" : "none";
+    return { ids, source, missingRequired, missingExplicit, scores: scored.slice(0, 16) };
+  }
   const lexical = scored.filter((h) => h.raw >= minScore && h.coverage >= minCoverage).slice(0, limit);
   if (lexical.length) return { ids: lexical.map((h) => h.id), source: "router", missingRequired, missingExplicit, scores: scored.slice(0, 16) };
   const defaults = idList(role?.default)
