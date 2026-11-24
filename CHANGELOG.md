@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.1
+
+- **Fix OpenCode V2.4.x Tool `output` Schema Contract (`src/plugin.ts`):**
+  - Declare explicit JSON Schema `output` definitions (`SEARCH_OUTPUT_SCHEMA`, `INFO_OUTPUT_SCHEMA`, `PLAN_OUTPUT_SCHEMA`, `STATUS_OUTPUT_SCHEMA`, `LOAD_OUTPUT_SCHEMA`, `RESOURCE_OUTPUT_SCHEMA`) on all 6 `lazy_skill_*` tool registrations so OpenCode `v2.4.1` host `outputSchema` validation accepts structured `{ content, output }` results in both standalone and multi-plugin setups.
+  - Return consistent schema-compliant structured `output` across every branch of `lazy_skill_load` (including vault loads: `{ id, scope, loaded, base }`) and `lazy_skill_resource` (`{ id, path, bytes }`), and type `output?: unknown` in `PluginContextLike`.
+  - Add contract verification suite (`tests/tool-output-schema.test.js`) validating all 6 tools and every return branch against their declared JSON Schemas, plus live verification inside an isolated `opencode v2.4.1 --standalone` host (**199 / 199** passing tests across 15 suites).
+
 ## 1.6.0
 
 - **Strict-Frontmatter Compatible BM25F Scoring (`src/core/rank.ts`):**

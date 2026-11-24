@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/opencode-lazy-se?color=blue&logo=npm&logoColor=white)](https://www.npmjs.com/package/opencode-lazy-se)
 [![OpenCode: V2 (>=2.3.0)](https://img.shields.io/badge/OpenCode-V2%20(%3E%3D2.3.0)-10b981?logo=terminal&logoColor=white)](https://opencode.ai)
 [![Host baseline](https://img.shields.io/badge/Host%20baseline-v2.4.1%20verified-10b981?logo=checkmarx&logoColor=white)](docs/QUALITY.md)
-[![Tests: 198/198 Passing](https://img.shields.io/badge/Tests-198%2F198%20Passing-339933?logo=githubactions&logoColor=white)](docs/QUALITY.md)
+[![Tests: 199/199 Passing](https://img.shields.io/badge/Tests-199%2F199%20Passing-339933?logo=githubactions&logoColor=white)](docs/QUALITY.md)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-339933?logo=nodedotjs&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -21,16 +21,16 @@ It operates 100% standalone without requiring any external orchestrator package,
 
 ![Automated and host acceptance results](docs/assets/verification-overview.svg)
 
-> Lazy Skill Engine **v1.6.0** (`opencode-lazy-se`) was verified on **24 November 2026** against **OpenCode v2.4.1** (`@opencode/plugin@2.4.1`) on Node **26.13.1**:
+> Lazy Skill Engine **v1.6.1** (`opencode-lazy-se`) was verified on **24 November 2026** against live **OpenCode v2.4.1** (`@opencode/plugin@2.4.1`) on Node **26.13.1**:
 
-- **Unit, Integration & Regression Suite:** **198 / 198** tests passing across 14 test suites (`npm test` / `npm run check`).
-- **Strict TypeScript & Dual-Target TUI Build:** `tsc --noEmit --noUnusedLocals --noUnusedParameters --noUncheckedIndexedAccess --exactOptionalPropertyTypes` passes with **0 warnings / 0 errors**; `scripts/emit-tui.mjs` verifies dual-target Solid/OpenTUI emission (`dist/tui-runtime.js`, `dist/tui-standalone.js`, `dist/tui.js`) and syntax across all **40** compiled JS modules.
-- **Packed-Artifact Sandbox Verification:** Packed `.tgz` (`npm pack`) verification, benchmark (`3000` skills indexed in ~170ms, `<1ms` mean query), adversarial vault/sidecar/mesh boundary checks, and clean git hygiene pass.
+- **Unit, Integration & Regression Suite:** **199 / 199** tests passing across 15 test suites (`npm test` / `npm run check`), including full JSON Schema `output` contract validation across all 6 `lazy_skill_*` tools (`tests/tool-output-schema.test.js`).
+- **Strict TypeScript & Dual-Target TUI Build:** `tsc --noEmit --noUnusedLocals --noUnusedParameters --noUncheckedIndexedAccess --exactOptionalPropertyTypes` passes with **0 warnings / 0 errors**; `scripts/emit-tui.mjs` verifies dual-target Solid/OpenTUI emission (`dist/tui-runtime.js`, `dist/tui-standalone.js`, `dist/tui.js`) and syntax across all **41** compiled JS modules.
+- **Live OpenCode v2.4.1 Host & Packed-Artifact Verification:** All 6 `lazy_skill_*` tools verified live inside an isolated `opencode v2.4.1 --standalone` host with declared `output` schemas and structured `{ content, output }` responses; packed `.tgz` (`npm pack`), benchmark (`3000` skills in ~165ms, `<1ms` mean query), and security checks pass.
 - **Zero Runtime Dependencies:** Pure TypeScript compiled to `dist/` with `0` third-party runtime dependencies.
 
 Read the detailed [Quality & Verification Matrix](docs/QUALITY.md), [Architecture Guide](docs/ARCHITECTURE.md), and [Standalone & Multi-Plugin Coexistence Guide](docs/COEXISTENCE.md).
 
-See the [1.6.0 release notes](CHANGELOG.md) for **strict-frontmatter (`name` + `description`) scoring**, safe bounded technical identifier & heading extraction, optional **`lazy-skill.json` / `skill.meta.json` sidecar metadata**, expanded **38-concept 13-language bridge**, and **OpenCode v2.4.1** (`@opentui/* >=0.8.0` peer) alignment.
+See the [1.6.1 release notes](CHANGELOG.md) for the **OpenCode v2.4.1 tool `output` schema fix** across all 6 `lazy_skill_*` tools, strict-frontmatter (`name` + `description`) scoring, safe bounded extraction, optional **`lazy-skill.json` / `skill.meta.json` sidecar metadata**, and expanded **38-concept 13-language bridge**.
 
 ---
 
@@ -49,7 +49,7 @@ See the [1.6.0 release notes](CHANGELOG.md) for **strict-frontmatter (`name` + `
 
 ## 📦 Installation
 
-The npm package name is **`opencode-lazy-se`** (internal plugin ID: `opencode-lazy-skill-engine`). Current version: **1.6.0** (OpenCode **v2.3.0+**, verified on **v2.4.1**).
+The npm package name is **`opencode-lazy-se`** (internal plugin ID: `opencode-lazy-skill-engine`). Current version: **1.6.1** (OpenCode **v2.3.0+**, verified on **v2.4.1**).
 
 OpenCode Lazy Skill Engine supports **Global**, **Project-Local**, **`.opencode/plugins/` Local Wrapper / Symlink**, **Local Development (`file://`)**, and **Remote TUI Client (`cli.json`)** installation modes.
 
@@ -76,7 +76,7 @@ Or pass optional inline plugin configuration:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     [
-      "opencode-lazy-se@1.6.0",
+      "opencode-lazy-se@1.6.1",
       {
         "mode": "auto",
         "autoBind": "adaptive",
@@ -196,7 +196,7 @@ OpenCode Lazy Skill Engine includes a dedicated V2 TUI extension (`./tui`) that 
 ### 🔽 Collapsed View (Default)
 
 ```text
-▶ lazy v1.6.0 · ● ready
+▶ lazy v1.6.1 · ● ready
 ```
 
 ### 🔼 Expanded View (Click to Toggle)
@@ -204,7 +204,7 @@ OpenCode Lazy Skill Engine includes a dedicated V2 TUI extension (`./tui`) that 
 Clicking the header toggles the expanded statistics panel:
 
 ```text
-▼ lazy v1.6.0 · ● ready
+▼ lazy v1.6.1 · ● ready
   Skills                               18
   Local                                 6
   Global                               12
