@@ -4,7 +4,19 @@ import { negativeTriggerMatch } from "./selection.js";
 import type { SkillEntry } from "./scanner.js";
 import type { FieldWeightKey } from "./config.js";
 
-const FIELDS: FieldWeightKey[] = ["id", "name", "keywords", "aliases", "tags", "triggers", "description"];
+type IndexFieldKey = FieldWeightKey | "derivedKeywords" | "derivedAliases";
+const EXPLICIT_META_FIELDS: readonly FieldWeightKey[] = ["keywords", "aliases", "tags", "triggers"];
+const INDEX_FIELDS: readonly IndexFieldKey[] = [
+  "id",
+  "name",
+  "keywords",
+  "aliases",
+  "tags",
+  "triggers",
+  "description",
+  "derivedKeywords",
+  "derivedAliases",
+];
 const C = "~"; // Explicit concept namespace: cannot collide with natural metadata tokens.
 const conceptToken = (t: string): string => C + t;
 
@@ -49,27 +61,31 @@ function features(text: string): string[] {
 
 /** Sparse inverted postings: candidate evaluation costs depend on matching docs, not total skill count. */
 export function createSearchIndex(skills: SkillEntry[], weights: Partial<Record<FieldWeightKey, number>> = {}): SearchIndex {
-  const rawDocs: Array<{ skill: SkillEntry; fields: Record<string, { tf: Map<string, number>; len: number }> }> = [];
+  const rawDocs: Array<{ skill: SkillEntry; fields: Record<IndexFieldKey, { tf: Map<string, number>; len: number }> }> = [];
   const postings = new Map<string, number[]>();
   const byId = new Map<string, number>();
   const df = new Map<string, number>();
-  const sumLength = Object.fromEntries(FIELDS.map((f) => [f, 0])) as Record<string, number>;
+  const sumLength = Object.fromEntries(INDEX_FIELDS.map((f) => [f, 0])) as Record<IndexFieldKey, number>;
+  const nonEmptyCount = Object.fromEntries(INDEX_FIELDS.map((f) => [f, 0])) as Record<IndexFieldKey, number>;
   const fuzzyBuckets = new Map<string, string[]>();
 
   for (let i = 0; i < skills.length; i++) {
     const skill = skills[i]!;
-    const fields: Record<string, { tf: Map<string, number>; len: number }> = {};
+    const fields = {} as Record<IndexFieldKey, { tf: Map<string, number>; len: number }>;
     const bag = new Set<string>();
     byId.set(fold(skill.id), i);
-    for (const f of FIELDS) {
+    for (const f of INDEX_FIELDS) {
       const counts = new Map<string, number>();
       const rawVal = skill[f];
       const input = Array.isArray(rawVal) ? rawVal.join(" ") : String(rawVal ?? "");
       const terms = features(input);
       for (const t of terms.slice(0, 130)) counts.set(t, Math.min(3, (counts.get(t) ?? 0) + 1));
-      const len = Math.max(1, terms.length);
-      fields[f] = { tf: counts, len };
-      sumLength[f] = (sumLength[f] ?? 0) + len;
+      const len = terms.length;
+      fields[f] = { tf: counts, len: Math.max(1, len) };
+      if (len > 0) {
+        sumLength[f] += len;
+        nonEmptyCount[f] += 1;
+      }
       for (const t of counts.keys()) bag.add(t);
     }
     rawDocs.push({ skill, fields });
@@ -96,7 +112,7 @@ export function createSearchIndex(skills: SkillEntry[], weights: Partial<Record<
   }
 
   const avg = Object.fromEntries(
-    FIELDS.map((f) => [f, Math.max(1, (sumLength[f] ?? 0) / Math.max(1, rawDocs.length))])
+    INDEX_FIELDS.map((f) => [f, Math.max(1, sumLength[f] / Math.max(1, nonEmptyCount[f]))])
   ) as Record<string, number>;
   const n = Math.max(1, rawDocs.length);
   const idf = new Map<string, number>();
@@ -116,21 +132,68 @@ export function createSearchIndex(skills: SkillEntry[], weights: Partial<Record<
     triggers: 5,
     description: 1.8,
   };
+  const resolvedWeights: Record<FieldWeightKey, number> = {
+    id: weights.id ?? defaultWeights.id,
+    name: weights.name ?? defaultWeights.name,
+    keywords: weights.keywords ?? defaultWeights.keywords,
+    aliases: weights.aliases ?? defaultWeights.aliases,
+    tags: weights.tags ?? defaultWeights.tags,
+    triggers: weights.triggers ?? defaultWeights.triggers,
+    description: weights.description ?? defaultWeights.description,
+  };
+  const derivedKeywordsWeight = resolvedWeights.keywords * 0.6;
+  const derivedAliasesWeight = resolvedWeights.aliases * 0.55;
+  const metaAnchor = Math.max(1, resolvedWeights.keywords, resolvedWeights.triggers, resolvedWeights.description);
+  const metaKnee = metaAnchor * 0.64;
+  const metaCap = metaAnchor * 1.0;
+  const metaHead = Math.max(0.01, metaCap - metaKnee);
 
   const docs = rawDocs.map((doc) => {
-    const strengths = new Map<string, TokenStrength>();
-    for (const f of FIELDS) {
-      const { tf, len } = doc.fields[f]!;
-      const weight = weights[f] ?? defaultWeights[f];
+    const hasExplicitMeta = EXPLICIT_META_FIELDS.some((f) => doc.fields[f].tf.size > 0);
+    const effectiveDescWeight =
+      !hasExplicitMeta && resolvedWeights.description > 0
+        ? Math.max(resolvedWeights.description, Math.min(metaAnchor, resolvedWeights.description * 2.5))
+        : resolvedWeights.description;
+    const parts = new Map<string, { identity: number; meta: number; name: boolean }>();
+
+    for (const f of INDEX_FIELDS) {
+      const { tf, len } = doc.fields[f];
+      if (tf.size === 0) continue;
+      const weight =
+        f === "description"
+          ? effectiveDescWeight
+          : f === "derivedKeywords"
+            ? derivedKeywordsWeight
+            : f === "derivedAliases"
+              ? derivedAliasesWeight
+              : resolvedWeights[f];
+      if (weight <= 0) continue;
+      const denomBase = 1.2 * (0.25 + (0.75 * len) / (avg[f] ?? 1));
+      const isIdentity = f === "id" || f === "name";
       for (const [token, freq] of tf) {
-        const val = weight * (freq / (freq + 1.2 * (0.25 + (0.75 * len) / (avg[f] ?? 1))));
-        const rec = strengths.get(token) ?? { score: 0, name: false };
-        rec.score += val;
-        if (f === "id" || f === "name") rec.name = true;
-        strengths.set(token, rec);
+        const val = weight * (freq / (freq + denomBase));
+        const rec = parts.get(token) ?? { identity: 0, meta: 0, name: false };
+        if (isIdentity) {
+          rec.identity += val;
+          rec.name = true;
+        } else {
+          rec.meta += val;
+        }
+        parts.set(token, rec);
       }
     }
-    for (const [token, record] of strengths) record.score *= idf.get(token) ?? 1;
+
+    const strengths = new Map<string, TokenStrength>();
+    for (const [token, part] of parts) {
+      const saturatedMeta =
+        part.meta <= metaKnee
+          ? part.meta
+          : metaKnee + metaHead * ((part.meta - metaKnee) / (part.meta - metaKnee + metaHead));
+      strengths.set(token, {
+        score: (part.identity + saturatedMeta) * (idf.get(token) ?? 1),
+        name: part.name,
+      });
+    }
     return { skill: doc.skill, strengths };
   });
 
@@ -274,7 +337,7 @@ export function search(index: SearchIndex, query: string, options: SearchOptions
     value *= Math.pow(coverage, 1.3) * (1 + 0.08 * Math.min(6, hits));
     if (parsed.phrases.length) {
       const whole = fold(
-        `${d.skill.id} ${d.skill.name} ${d.skill.description} ${(d.skill.keywords ?? []).join(" ")} ${(d.skill.aliases ?? []).join(" ")} ${(d.skill.triggers ?? []).join(" ")} ${(d.skill.tags ?? []).join(" ")}`
+        `${d.skill.id} ${d.skill.name} ${d.skill.description} ${(d.skill.keywords ?? []).join(" ")} ${(d.skill.aliases ?? []).join(" ")} ${(d.skill.triggers ?? []).join(" ")} ${(d.skill.tags ?? []).join(" ")} ${(d.skill.derivedKeywords ?? []).join(" ")} ${(d.skill.derivedAliases ?? []).join(" ")}`
       );
       for (const phrase of parsed.phrases) if (whole.includes(phrase)) value += 4;
     }

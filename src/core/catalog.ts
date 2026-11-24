@@ -1,10 +1,18 @@
-import { scanVaults, parseFrontmatter, type CachedFrontmatter, type ScanDiagnostic, type SkillEntry } from "./scanner.js";
+import {
+  scanVaults,
+  parseFrontmatter,
+  extractDerivedSignals,
+  readSidecarSync,
+  type CachedFrontmatter,
+  type ScanDiagnostic,
+  type SkillEntry,
+} from "./scanner.js";
 import { createSearchIndex, search, type SearchHit, type SearchIndex, type SearchOptions } from "./rank.js";
 import { clipped } from "./text.js";
 import { LANGUAGES, type LanguageCode } from "./concepts.js";
 import { inside } from "./security.js";
 import { existsSync, realpathSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { basename, dirname, resolve, join } from "node:path";
 import type { LazySkillOptions } from "./config.js";
 
 const safeReal = (p: string): string => {
@@ -57,17 +65,30 @@ export function normalizeNative(
   return raw
     .filter((s): s is RawNativeSkill => Boolean(s && typeof s === "object" && typeof (s as RawNativeSkill).id === "string" && !opts.exclude.has((s as RawNativeSkill).id)))
     .map((s) => {
-      const meta =
+      const parsed =
         typeof s.content === "string"
-          ? parseFrontmatter(s.content.slice(0, opts.maxFrontmatterBytes + 16), opts.maxFrontmatterBytes).meta
-          : {};
+          ? parseFrontmatter(s.content.slice(0, opts.maxFrontmatterBytes + 16), opts.maxFrontmatterBytes)
+          : { meta: {}, body: "" };
+      const meta = parsed.meta;
+      const skillDir =
+        typeof s.path === "string" && s.path.trim()
+          ? basename(s.path) === "SKILL.md"
+            ? dirname(s.path)
+            : existsSync(join(s.path, "SKILL.md"))
+              ? s.path
+              : null
+          : null;
+      const sidecar = skillDir ? readSidecarSync(skillDir, opts.maxFrontmatterBytes) : undefined;
       const values = (key: string): string[] => {
         const direct = s[key];
-        if (Array.isArray(direct)) return direct.filter((x): x is string => typeof x === "string");
+        const out: string[] = [];
+        if (Array.isArray(direct)) out.push(...direct.filter((x): x is string => typeof x === "string"));
         const fmVal = meta[key];
-        if (Array.isArray(fmVal)) return fmVal;
-        if (typeof fmVal === "string" && fmVal) return [fmVal];
-        return [];
+        if (Array.isArray(fmVal)) out.push(...fmVal);
+        else if (typeof fmVal === "string" && fmVal) out.push(fmVal);
+        const scVal = sidecar && Object.hasOwn(sidecar, key) ? (sidecar as Record<string, unknown>)[key] : undefined;
+        if (Array.isArray(scVal)) out.push(...scVal.filter((x): x is string => typeof x === "string"));
+        return [...new Set(out)];
       };
       const origin: SkillEntry["origin"] =
         (typeof s.path === "string" && inside(projectOpenCode, safeReal(s.path))) || hasProjectNative(projectOpenCode, s.id)
@@ -81,11 +102,16 @@ export function normalizeNative(
             : typeof s.name === "string" && s.name.trim()
               ? s.name
               : "";
+      const description = clipped(rawDescription, 700);
+      const keywords = [...new Set([...(opts.rules[s.id] || []), ...values("keywords")])].slice(0, 64);
+      const triggers = values("triggers").slice(0, 64);
+      const derived =
+        keywords.length === 0 && triggers.length === 0 ? extractDerivedSignals(description, parsed.body.slice(0, 2048)) : null;
       return {
         id: s.id,
         name: clipped(s.name ?? s.id, 100),
-        description: clipped(rawDescription, 700),
-        keywords: [...new Set([...(opts.rules[s.id] || []), ...values("keywords")])].slice(0, 64),
+        description,
+        keywords,
         aliases: [
           ...new Set([
             ...values("aliases"),
@@ -98,10 +124,12 @@ export function normalizeNative(
           ]),
         ].slice(0, 90),
         tags: values("tags").slice(0, 64),
-        triggers: values("triggers").slice(0, 64),
+        triggers,
         negativeTriggers: values("negativeTriggers").slice(0, 64),
         languages: values("languages").filter((x): x is LanguageCode => LANGUAGES.includes(x as LanguageCode)).slice(0, 13),
         roles: values("roles").slice(0, 64),
+        ...(derived?.derivedKeywords.length ? { derivedKeywords: derived.derivedKeywords } : {}),
+        ...(derived?.derivedAliases.length ? { derivedAliases: derived.derivedAliases } : {}),
         scope: "native",
         origin,
         source: "native",
@@ -159,8 +187,21 @@ export class Catalog {
           this.nativeReady = true;
           if (this.originals) {
             for (const s of native) {
-              if (this.originals.has(s.id)) s.description = this.originals.get(s.id)!;
-              else this.originals.set(s.id, s.description);
+              if (this.originals.has(s.id)) {
+                const origDesc = this.originals.get(s.id)!;
+                if (origDesc !== s.description) {
+                  s.description = origDesc;
+                  if (s.keywords.length === 0 && s.triggers.length === 0) {
+                    const reDerived = extractDerivedSignals(origDesc);
+                    const mergedKw = [...new Set([...reDerived.derivedKeywords, ...(s.derivedKeywords ?? [])])].slice(0, 32);
+                    const mergedAl = [...new Set([...reDerived.derivedAliases, ...(s.derivedAliases ?? [])])].slice(0, 16);
+                    if (mergedKw.length) s.derivedKeywords = mergedKw;
+                    if (mergedAl.length) s.derivedAliases = mergedAl;
+                  }
+                }
+              } else {
+                this.originals.set(s.id, s.description);
+              }
             }
           }
         } catch (e) {

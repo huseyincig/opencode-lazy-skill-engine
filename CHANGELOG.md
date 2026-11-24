@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.6.0
+
+- **Strict-Frontmatter Compatible BM25F Scoring (`src/core/rank.ts`):**
+  - Compute BM25F field length averages (`avg[f]`) exclusively across documents where field `f` is non-empty so sparse metadata fields never distort length normalization.
+  - Apply adaptive `description` weight compensation (default `1.8 -> 4.5`) for standard `name + description` skills (Agent Skills / OpenCode V2 / Claude / Antigravity format with empty `keywords`/`triggers`/`tags`/`aliases`), paired with per-token non-identity metadata saturation so keyword-stuffed frontmatter cannot unfairly drown out strict skills.
+  - Index synthetic `derivedKeywords` and `derivedAliases` fields at lower weight than explicit frontmatter fields (`3.0` / `2.2` vs `5` / `4`) and include them in quoted phrase boosts.
+- **Safe Bounded Auto-Extraction (`src/core/scanner.ts`, `src/core/catalog.ts`):**
+  - Automatically derive bounded synthetic signals (`extractDerivedSignals`) for standard skills with empty `keywords`/`triggers` without mutating explicit fields: inline backticks, `@scope/pkg`, `dot.notation`, `camelCase`/`PascalCase`, `kebab-case`, `UPPER_SNAKE_CASE`, `Use when ...` trigger clauses, and `#`/`##` headings from the bounded body prefix (skipping fenced code blocks and boilerplate headings, respecting `maxFrontmatterBytes`).
+  - Apply derived extraction consistently across vault skills, native skills (`normalizeNative`), and `nativeCatalog: "compact"` refresh cycles.
+- **Optional Sidecar Metadata (`lazy-skill.json` / `skill.meta.json`):**
+  - Safely load optional per-skill sidecar JSON metadata (`keywords`, `aliases`, `triggers`, `tags`, `negativeTriggers`, `languages`, `roles`) for both vault and native skills and merge with `options.rules` while keeping `SKILL.md` frontmatter pure.
+  - Enforce symlink rejection (`lstat` + `O_NOFOLLOW` + `inside`), `maxFrontmatterBytes` cap, UTF-8/prototype-pollution sanitization, and incremental cache invalidation when a sidecar file changes.
+- **Expanded 13-Language Concept Bridge (`src/core/concepts.ts`, `src/core/text.ts`):**
+  - Add 5 new 13-language engineering concepts (`plugin`, `permission`, `compaction`, `ui`, `orchestration`, bringing total to `38`), strengthen Turkish/English mappings (`security`, `review`, `api`, `automation`, `configuration`, `caching`), and expand Turkish technical clues in `detectLanguage()`.
+- **OpenCode v2.4.1 Alignment (`package.json`):**
+  - Align `peerDependencies` `@opentui/core` and `@opentui/solid` floor to `>=0.8.0` (matching `@opencode/plugin@2.4.1`) and update `devDependencies` to `@opencode/plugin@^2.4.1`, `@opentui/core@^0.9.9`, `@opentui/solid@^0.9.9`.
+  - Expand automated verification suite to **198 / 198** passing tests across 14 suites (`tests/strict-frontmatter.test.js`).
+
 ## 1.5.4
 
 - Align with **OpenCode v2.4.0** (`@opencode/plugin@2.4.0`, `@opentui/core >=0.9.4`, `@opentui/solid >=0.9.4`):

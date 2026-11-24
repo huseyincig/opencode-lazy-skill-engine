@@ -1,7 +1,8 @@
 import { readdir, lstat, realpath } from "node:fs/promises";
+import { constants as fsConstants, lstatSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { inside, peekMetadata } from "./security.js";
+import { inside, peekMetadata, safeRead } from "./security.js";
 import { clipped } from "./text.js";
 import { LANGUAGES, type LanguageCode } from "./concepts.js";
 import type { LazySkillOptions } from "./config.js";
@@ -10,9 +11,51 @@ const GLOBAL_VAULT_ROOT = resolve(join(homedir(), ".config", "opencode", "skill-
 
 const ignored = new Set([".git", ".hg", ".svn", "node_modules", ".next", "dist", "build", ".cache", "__pycache__"]);
 const validID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const validRoleID = /^[a-z][a-z0-9-]{0,62}$/;
+const SIDECAR_FILES = ["lazy-skill.json", "skill.meta.json"] as const;
+const MAX_HEADING_PREFIX_CHARS = 2048;
+const MAX_HEADING_LINES = 40;
+const utf8Fatal = new TextDecoder("utf-8", { fatal: true });
+const BOILERPLATE_HEADINGS = new Set([
+  "overview",
+  "when to use",
+  "usage",
+  "example",
+  "examples",
+  "reference",
+  "references",
+  "note",
+  "notes",
+  "summary",
+  "introduction",
+  "intro",
+  "prerequisites",
+  "checklist",
+  "verification checklist",
+  "red flags",
+  "sources",
+  "table of contents",
+  "related skills",
+  "see also",
+]);
 
 export type FrontmatterValue = string | string[];
 export type FrontmatterMeta = Record<string, FrontmatterValue>;
+
+export interface SidecarMeta {
+  keywords?: string[];
+  aliases?: string[];
+  tags?: string[];
+  triggers?: string[];
+  negativeTriggers?: string[];
+  languages?: LanguageCode[];
+  roles?: string[];
+}
+
+export interface DerivedSignals {
+  derivedKeywords: string[];
+  derivedAliases: string[];
+}
 
 export interface SkillEntry {
   id: string;
@@ -25,6 +68,8 @@ export interface SkillEntry {
   negativeTriggers: string[];
   languages: LanguageCode[];
   roles: string[];
+  derivedKeywords?: string[];
+  derivedAliases?: string[];
   origin: "project" | "global" | "host" | "bundled";
   path: string | null;
   base: string | null;
@@ -44,6 +89,8 @@ export interface ScanDiagnostic {
 export interface CachedFrontmatter {
   stamp: string;
   meta: FrontmatterMeta;
+  bodyPrefix?: string;
+  sidecar?: SidecarMeta;
 }
 
 export interface ScanVaultResult {
@@ -178,46 +225,268 @@ function resolveOrigin(file: string, root: string, priority: number, opts: Pick<
   return priority === 1 ? "project" : priority === 0 ? "global" : "host";
 }
 
+function dedupeClipped(values: readonly string[], limit: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const clean = clippedWord(raw);
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Extract bounded synthetic keyword/alias signals from standard `name + description` skills
+ * without reading past `maxFrontmatterBytes` or mutating explicit frontmatter fields.
+ */
+export function extractDerivedSignals(description: string, bodyPrefix = ""): DerivedSignals {
+  const desc = typeof description === "string" ? description.slice(0, 1200) : "";
+  const rawKeywords: string[] = [];
+  const rawAliases: string[] = [];
+
+  if (desc) {
+    // 1. Inline backtick code spans
+    for (const m of desc.matchAll(/`([^`\r\n]{2,64})`/g)) {
+      const inner = (m[1] ?? "").trim();
+      if (inner && /[\p{L}\p{N}]/u.test(inner)) rawKeywords.push(inner);
+    }
+    // 2. Scoped packages (@scope/pkg or @scope/pkg/subpath)
+    for (const m of desc.matchAll(/@[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)+/gi)) {
+      rawKeywords.push(m[0]);
+    }
+    // 3. Dot notation identifiers (Plugin.define, model.transform, client.experimental.automation)
+    for (const m of desc.matchAll(/\b[a-zA-Z_][\w$]*(?:\.[a-zA-Z_][\w$]*){1,4}\b/g)) {
+      rawKeywords.push(m[0]);
+    }
+    // 4. camelCase / PascalCase identifiers (SyntaxStyle, CodeMode, autoBind)
+    for (const m of desc.matchAll(/\b(?:[a-z]+[A-Z][a-zA-Z0-9]*|[A-Z][a-z0-9]+[A-Z][a-zA-Z0-9]*)\b/g)) {
+      rawKeywords.push(m[0]);
+    }
+    // 5. kebab-case identifiers (supply-chain, prompt-cache, read-only)
+    for (const m of desc.matchAll(/\b(?=[a-zA-Z0-9-]*[a-zA-Z])[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+){1,5}\b/g)) {
+      rawKeywords.push(m[0]);
+    }
+    // 6. UPPER_SNAKE_CASE constants (FORBIDDEN_TOOLS)
+    for (const m of desc.matchAll(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g)) {
+      rawKeywords.push(m[0]);
+    }
+    // 7. Trigger clauses ("Use when ...", "Apply when ...")
+    for (const m of desc.matchAll(/\b(?:use|apply|invoke|trigger)\s+when\s+([^.\r\n;]{6,180})/gi)) {
+      const clause = (m[1] ?? "").trim().replace(/^["'`]+|["'`]+$/g, "");
+      if (!clause) continue;
+      const colonIdx = clause.indexOf(":");
+      if (colonIdx >= 6) {
+        rawAliases.push(clause.slice(0, colonIdx).trim());
+        const tail = clause.slice(colonIdx + 1);
+        for (const part of tail.split(",").slice(0, 4)) {
+          const item = part.trim();
+          if (item.length >= 4 && item.length <= 64) rawAliases.push(item);
+        }
+      } else {
+        const commaIdx = clause.indexOf(",");
+        rawAliases.push(commaIdx >= 10 ? clause.slice(0, commaIdx).trim() : clause);
+      }
+    }
+  }
+
+  if (typeof bodyPrefix === "string" && bodyPrefix) {
+    const lines = bodyPrefix.slice(0, MAX_HEADING_PREFIX_CHARS).split(/\r?\n/, MAX_HEADING_LINES);
+    let inFence = false;
+    let headingCount = 0;
+    for (const line of lines) {
+      if (/^\s*(?:```|~~~)/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      const h = /^#{1,2}[ \t]+(.+?)[ \t]*#*$/.exec(line);
+      if (!h) continue;
+      const clean = (h[1] ?? "")
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+        .replace(/[`*_~]+/g, "")
+        .trim();
+      if (clean.length < 3 || BOILERPLATE_HEADINGS.has(clean.toLowerCase())) continue;
+      rawAliases.push(clean);
+      headingCount++;
+      if (headingCount >= 6) break;
+    }
+  }
+
+  return {
+    derivedKeywords: dedupeClipped(rawKeywords, 32),
+    derivedAliases: dedupeClipped(rawAliases, 16),
+  };
+}
+
+function sidecarStringList(obj: Record<string, unknown>, key: string): string[] {
+  if (!Object.hasOwn(obj, key)) return [];
+  const val = obj[key];
+  if (!Array.isArray(val)) return [];
+  return val.filter((x): x is string => typeof x === "string");
+}
+
+export function parseSidecarJson(raw: string): SidecarMeta | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const obj = parsed as Record<string, unknown>;
+  const keywords = dedupeClipped(sidecarStringList(obj, "keywords"), 40);
+  const aliases = dedupeClipped(sidecarStringList(obj, "aliases"), 60);
+  const tags = dedupeClipped(sidecarStringList(obj, "tags"), 40);
+  const triggers = dedupeClipped(sidecarStringList(obj, "triggers"), 64);
+  const negativeTriggers = dedupeClipped(sidecarStringList(obj, "negativeTriggers"), 64);
+  const languages = [...new Set(sidecarStringList(obj, "languages"))].filter((x): x is LanguageCode =>
+    LANGUAGES.includes(x as LanguageCode)
+  ).slice(0, 13);
+  const roles = dedupeClipped(sidecarStringList(obj, "roles"), 64).filter((x) => validRoleID.test(x));
+  return {
+    ...(keywords.length ? { keywords } : {}),
+    ...(aliases.length ? { aliases } : {}),
+    ...(tags.length ? { tags } : {}),
+    ...(triggers.length ? { triggers } : {}),
+    ...(negativeTriggers.length ? { negativeTriggers } : {}),
+    ...(languages.length ? { languages } : {}),
+    ...(roles.length ? { roles } : {}),
+  };
+}
+
+async function statSidecar(skillDir: string): Promise<{ name: (typeof SIDECAR_FILES)[number]; stamp: string } | null> {
+  for (const name of SIDECAR_FILES) {
+    try {
+      const st = await lstat(join(skillDir, name));
+      if (st.isSymbolicLink() || !st.isFile()) continue;
+      return { name, stamp: `${name}:${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}` };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function readSidecar(
+  skillDir: string,
+  name: string,
+  maxBytes: number,
+  trustedRoot: string
+): Promise<SidecarMeta | undefined> {
+  try {
+    const raw = await safeRead(skillDir, name, maxBytes, trustedRoot);
+    return parseSidecarJson(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Synchronous, symlink-safe, bounded sidecar reader for native skill directories. */
+export function readSidecarSync(skillDir: string, maxBytes = 8192): SidecarMeta | undefined {
+  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 1024 * 1024) return undefined;
+  let canonicalBase: string;
+  try {
+    canonicalBase = realpathSync(skillDir);
+  } catch {
+    return undefined;
+  }
+  for (const name of SIDECAR_FILES) {
+    const candidate = resolve(canonicalBase, name);
+    if (!inside(canonicalBase, candidate)) continue;
+    try {
+      const st = lstatSync(candidate);
+      if (st.isSymbolicLink() || !st.isFile() || st.size > maxBytes) continue;
+      const canonicalFile = realpathSync(candidate);
+      if (!inside(canonicalBase, canonicalFile)) continue;
+      const fd = openSync(canonicalFile, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      try {
+        const buf = Buffer.allocUnsafe(st.size + 1);
+        let n = 0;
+        while (n < buf.length) {
+          const got = readSync(fd, buf, n, buf.length - n, n);
+          if (!got) break;
+          n += got;
+        }
+        if (n > maxBytes) continue;
+        const bytes = buf.subarray(0, n);
+        if (bytes.includes(0)) continue;
+        const text = utf8Fatal.decode(bytes);
+        const parsed = parseSidecarJson(text);
+        if (parsed) return parsed;
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 export function normalizeEntry(
   meta: FrontmatterMeta,
   file: string,
   root: string,
   priority: number,
-  opts: Pick<LazySkillOptions, "project" | "exclude" | "rules">
+  opts: Pick<LazySkillOptions, "project" | "exclude" | "rules">,
+  extra?: { bodyPrefix?: string; sidecar?: SidecarMeta }
 ): SkillEntry | null {
   const id = idFromPath(file).toLowerCase();
   if (!validID.test(id) || id.length > 64 || opts.exclude.has(id)) return null;
   const description = clipped(meta.description, 700);
   if (!description) return null;
   const nameVal = typeof meta.name === "string" && meta.name ? meta.name : id;
+  const sidecar = extra?.sidecar;
+  const keywords = [
+    ...new Set([...getList(meta.keywords), ...(sidecar?.keywords ?? []), ...(opts.rules[id] || [])].map(clippedWord).filter(Boolean)),
+  ].slice(0, 40);
+  const aliases = [
+    ...new Set(
+      [
+        ...getList(meta.aliases),
+        ...(sidecar?.aliases ?? []),
+        ...LANGUAGES.flatMap((lang) => [
+          ...getList(meta[`keywords_${lang}`]),
+          ...getList(meta[`keywords-${lang}`]),
+          typeof meta[`name_${lang}`] === "string" ? meta[`name_${lang}`] : "",
+          typeof meta[`description_${lang}`] === "string" ? meta[`description_${lang}`] : "",
+        ]).filter((x): x is string => Boolean(x)),
+      ]
+        .map(clippedWord)
+        .filter(Boolean)
+    ),
+  ].slice(0, 60);
+  const tags = [...new Set([...getList(meta.tags), ...(sidecar?.tags ?? [])].map(clippedWord).filter(Boolean))].slice(0, 40);
+  const triggers = [...new Set([...getList(meta.triggers), ...(sidecar?.triggers ?? [])].map(clippedWord).filter(Boolean))].slice(0, 64);
+  const negativeTriggers = [
+    ...new Set([...getList(meta.negativeTriggers), ...(sidecar?.negativeTriggers ?? [])].map(clippedWord).filter(Boolean)),
+  ].slice(0, 64);
+  const languages = [...new Set([...getList(meta.languages), ...(sidecar?.languages ?? [])])]
+    .filter((x): x is LanguageCode => LANGUAGES.includes(x as LanguageCode))
+    .slice(0, 13);
+  const roles = [...new Set([...getList(meta.roles), ...(sidecar?.roles ?? [])].map(clippedWord))]
+    .filter((x) => validRoleID.test(x))
+    .slice(0, 64);
+  const derived = keywords.length === 0 && triggers.length === 0 ? extractDerivedSignals(description, extra?.bodyPrefix ?? "") : null;
+
   return {
     id,
     name: clipped(nameVal, 100),
     description,
-    keywords: [...new Set([...getList(meta.keywords), ...(opts.rules[id] || [])].map(clippedWord).filter(Boolean))].slice(0, 40),
-    aliases: [
-      ...new Set(
-        [
-          ...getList(meta.aliases),
-          ...LANGUAGES.flatMap((lang) => [
-            ...getList(meta[`keywords_${lang}`]),
-            ...getList(meta[`keywords-${lang}`]),
-            typeof meta[`name_${lang}`] === "string" ? meta[`name_${lang}`] : "",
-            typeof meta[`description_${lang}`] === "string" ? meta[`description_${lang}`] : "",
-          ]).filter((x): x is string => Boolean(x)),
-        ]
-          .map(clippedWord)
-          .filter(Boolean)
-      ),
-    ].slice(0, 60),
-    tags: getList(meta.tags).map(clippedWord).filter(Boolean).slice(0, 40),
-    triggers: getList(meta.triggers).map(clippedWord).filter(Boolean).slice(0, 64),
-    negativeTriggers: getList(meta.negativeTriggers).map(clippedWord).filter(Boolean).slice(0, 64),
-    languages: getList(meta.languages).filter((x): x is LanguageCode => LANGUAGES.includes(x as LanguageCode)).slice(0, 13),
-    roles: getList(meta.roles)
-      .map(clippedWord)
-      .filter((x) => /^[a-z][a-z0-9-]{0,62}$/.test(x))
-      .slice(0, 64),
+    keywords,
+    aliases,
+    tags,
+    triggers,
+    negativeTriggers,
+    languages,
+    roles,
+    ...(derived?.derivedKeywords.length ? { derivedKeywords: derived.derivedKeywords } : {}),
+    ...(derived?.derivedAliases.length ? { derivedAliases: derived.derivedAliases } : {}),
     origin: resolveOrigin(file, root, priority, opts),
     path: file,
     base: resolve(file, ".."),
@@ -283,21 +552,39 @@ export async function scanVaults(
           if (st.size > opts.maxSkillBytes || !st.isFile()) continue;
           const rp = await realpath(p);
           if (!inside(realRoot, rp)) continue;
-          const stamp = [st.dev, st.ino, st.size, st.mtimeMs, st.ctimeMs].join(":");
+          const sidecarStat = e.name === "SKILL.md" ? await statSidecar(resolve(rp, "..")) : null;
+          const stamp = `${[st.dev, st.ino, st.size, st.mtimeMs, st.ctimeMs].join(":")}|${sidecarStat?.stamp ?? "none"}`;
           const cached = cache.get(rp);
           let meta: FrontmatterMeta;
+          let bodyPrefix: string | undefined;
+          let sidecar: SidecarMeta | undefined;
           if (!force && cached?.stamp === stamp) {
             meta = cached.meta;
+            bodyPrefix = cached.bodyPrefix;
+            sidecar = cached.sidecar;
             metadataReuses++;
           } else {
             const text = await peekMetadata(rp, opts.maxSkillBytes, opts.maxFrontmatterBytes);
             if (text.includes("\0")) continue;
-            meta = parseFrontmatter(text, opts.maxFrontmatterBytes).meta;
+            const parsed = parseFrontmatter(text, opts.maxFrontmatterBytes);
+            meta = parsed.meta;
+            bodyPrefix = parsed.body.slice(0, MAX_HEADING_PREFIX_CHARS);
+            sidecar = sidecarStat
+              ? await readSidecar(resolve(rp, ".."), sidecarStat.name, opts.maxFrontmatterBytes, realRoot)
+              : undefined;
             metadataReads++;
-            cache.set(rp, { stamp, meta });
+            cache.set(rp, {
+              stamp,
+              meta,
+              ...(bodyPrefix ? { bodyPrefix } : {}),
+              ...(sidecar ? { sidecar } : {}),
+            });
           }
           visitedPaths.add(rp);
-          const skill = normalizeEntry(meta, rp, realRoot, r, opts);
+          const skill = normalizeEntry(meta, rp, realRoot, r, opts, {
+            ...(bodyPrefix ? { bodyPrefix } : {}),
+            ...(sidecar ? { sidecar } : {}),
+          });
           if (skill) {
             vaultCounts.set(skill.id, (vaultCounts.get(skill.id) ?? 0) + 1);
             if (!found.has(skill.id)) found.set(skill.id, skill);

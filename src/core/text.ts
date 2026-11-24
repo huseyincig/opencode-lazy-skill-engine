@@ -54,7 +54,7 @@ export function detectLanguage(text: unknown, preferred: LanguageCode | "auto" =
     es: ["seguridad", "revisión", "código", "pruebas", "del", "con", "para"],
     vi: ["bảo mật", "kiểm tra", "kiểm thử", "mã nguồn", "giúp", "của", "cho"],
     nl: ["beveiliging", "controle", "fouten", "onderzoek", "van", "voor", "het"],
-    tr: ["güvenlik", "inceleme", "hata", "kod", "için", "lütfen", "yapılandırma"],
+    tr: ["güvenlik", "inceleme", "denetim", "hata", "kod", "için", "lütfen", "yapılandırma", "eklenti", "izin", "yetki", "önbellek", "sıkıştırma", "arayüz", "otomasyon"],
   };
   const raw = String(text ?? "").replace(/İ/g, "i").normalize("NFC").toLowerCase();
   let best: LanguageCode = "en";
