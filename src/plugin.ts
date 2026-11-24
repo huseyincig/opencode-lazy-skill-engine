@@ -699,7 +699,7 @@ export function createPlugin() {
           try {
             return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
           } catch {
-            return "1.7.0";
+            return "1.7.1";
           }
         })();
 

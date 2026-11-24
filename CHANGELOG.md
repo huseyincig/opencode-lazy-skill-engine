@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.1
+
+- **Idle Performance & Zero-Waste Polling (`src/core/catalog.ts`, `src/tui.tsx`):**
+  - Fingerprint sorted catalog entries (`catalogFingerprint`) in `Catalog.refresh()` so non-forced TTL refreshes with unchanged skills reuse the existing `SearchIndex` and skip redundant BM25F rebuilds and `version` increments (while forced refreshes and real skill edits rebuild immediately).
+  - Replace the fixed 5s `setInterval` in `LazySidebar` (`src/tui.tsx`) with an adaptive `schedulePoll()` (`5s` only while connecting, **`30s`** once connected; `plugin.updated`, `skill.updated`, and session switches still trigger immediate refresh) and add `sameSnapshot()` shallow equality before `setSnapshot()` to eliminate redundant SolidJS TUI re-renders.
+  - Add idle-performance regression tests in `tests/tui-rpc.test.js` (**212 / 212** passing tests across 16 suites, `42 / 42` JS modules, `0` strict typecheck errors on `@opencode/plugin@2.4.1`).
+
 ## 1.7.0
 
 - **Adaptive Role Baseline Binding (`baselineMode`) (`src/core/config.ts`, `src/core/selection.ts`, `src/plugin.ts`):**

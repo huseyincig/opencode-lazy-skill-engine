@@ -8,7 +8,7 @@ const pkgVersion = (() => {
   try {
     return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
   } catch {
-    return "1.7.0";
+    return "1.7.1";
   }
 })();
 
@@ -62,6 +62,31 @@ function StatRow(props: {
   );
 }
 
+const CONNECTED_POLL_MS = 30_000;
+const CONNECTING_POLL_MS = 5_000;
+
+function sameSnapshot(a: LazySkillStatsSnapshot | null, b: LazySkillStatsSnapshot): boolean {
+  if (!a) return false;
+  if (
+    a.version !== b.version ||
+    a.catalogVersion !== b.catalogVersion ||
+    a.ready !== b.ready ||
+    a.skills !== b.skills ||
+    a.local !== b.local ||
+    a.global !== b.global ||
+    a.conflicts !== b.conflicts
+  ) {
+    return false;
+  }
+  const aIds = Array.isArray(a.conflictIds) ? a.conflictIds : [];
+  const bIds = Array.isArray(b.conflictIds) ? b.conflictIds : [];
+  if (aIds.length !== bIds.length) return false;
+  for (let i = 0; i < aIds.length; i++) {
+    if (aIds[i] !== bIds[i]) return false;
+  }
+  return true;
+}
+
 export const setup: Plugin.Definition["setup"] = async (context) => {
   if (!context || typeof context.ui?.slot !== "function") return;
 
@@ -69,8 +94,23 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
   const [open, setOpen] = createSignal(true);
   let disposed = false;
   let inflight: Promise<void> | null = null;
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let lastDirectory: string | undefined;
   let activeSessionId: string | undefined;
+
+  const schedulePoll = (): void => {
+    if (pollTimer !== undefined) {
+      clearTimeout(pollTimer);
+      pollTimer = undefined;
+    }
+    if (disposed) return;
+    const delay = snapshot() ? CONNECTED_POLL_MS : CONNECTING_POLL_MS;
+    pollTimer = setTimeout(() => {
+      pollTimer = undefined;
+      void refresh();
+    }, delay);
+    pollTimer.unref?.();
+  };
 
   const resolveLocation = (): { directory?: string } | undefined => {
     try {
@@ -118,7 +158,7 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
         ]);
         if (!disposed && res && typeof res === "object" && resolveLocation()?.directory === currentDir) {
           lastDirectory = currentDir;
-          setSnapshot(res);
+          setSnapshot((prev) => (sameSnapshot(prev, res) ? prev : res));
         }
       } catch {
         // Server plugin may still be loading (v2.2.7+); if directory changed, clear stale cross-project snapshot.
@@ -131,6 +171,8 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
         inflight = null;
         if (!disposed && resolveLocation()?.directory !== currentDir) {
           void refresh();
+        } else {
+          schedulePoll();
         }
       }
     })();
@@ -150,11 +192,12 @@ export const setup: Plugin.Definition["setup"] = async (context) => {
     }
   }
 
-  const timer = setInterval(() => {
-    void refresh();
-  }, 5000);
-  timer.unref?.();
-  cleanups.push(() => clearInterval(timer));
+  cleanups.push(() => {
+    if (pollTimer !== undefined) {
+      clearTimeout(pollTimer);
+      pollTimer = undefined;
+    }
+  });
 
   const LazySidebar = () => {
     const colors = () => resolveLazyTheme(context as unknown as LazyThemeInput);

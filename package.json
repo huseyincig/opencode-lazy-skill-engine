@@ -1,6 +1,6 @@
 {
   "name": "opencode-lazy-se",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Host-neutral, 13-language lazy skill discovery, permission-aware binding, cold-vault access, and TUI sidebar for OpenCode V2",
   "type": "module",
   "main": "./dist/index.js",

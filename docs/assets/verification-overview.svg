@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="318" viewBox="0 0 1200 318" role="img" aria-labelledby="title description">
-<title id="title">OpenCode Lazy Skill Engine (opencode-lazy-se) v1.7.0 test results</title>
-<desc id="description">210 of 210 v1.7.0 unit, TUI, RPC, tool output schema, strict-frontmatter, adaptive baseline, mesh interoperability, and security tests across 16 test suites pass on OpenCode v2.4.1 with strict TypeScript verification and 0 runtime dependencies.</desc>
+<title id="title">OpenCode Lazy Skill Engine (opencode-lazy-se) v1.7.1 test results</title>
+<desc id="description">212 of 212 v1.7.1 unit, TUI, RPC, tool output schema, strict-frontmatter, adaptive baseline, idle performance, mesh interoperability, and security tests across 16 test suites pass on OpenCode v2.4.1 with strict TypeScript verification and 0 runtime dependencies.</desc>
 <rect width="1200" height="318" rx="14" fill="#111619"/>
 <rect x=".5" y=".5" width="1199" height="317" rx="13.5" stroke="#353e42" fill="none"/>
 <circle cx="48" cy="52" r="16" fill="none" stroke="#10b981" stroke-width="2"/>
 <path d="M41 52l5 5 9-9" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 <text x="76" y="46" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#f2f5f4">OPENCODE LAZY SKILL ENGINE (opencode-lazy-se)</text>
-<text x="76" y="68" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="13" fill="#94a6a1">v1.7.0 Pure OpenCode V2 (TypeScript + OpenTUI/Solid) • Verified on OpenCode v2.4.1 &amp; Node 26.13.1</text>
+<text x="76" y="68" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="13" fill="#94a6a1">v1.7.1 Pure OpenCode V2 (TypeScript + OpenTUI/Solid) • Verified on OpenCode v2.4.1 &amp; Node 26.13.1</text>
 <path d="M36 91H1164" stroke="#353e42"/>
 <text x="40" y="138" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing=".8" fill="#a3b2ae">AUTOMATED TESTS</text>
-<text x="40" y="206" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="55" font-weight="700" fill="#f2f5f4">210<tspan font-size="25" font-weight="400" fill="#94a6a1"> / 210</tspan></text>
+<text x="40" y="206" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="55" font-weight="700" fill="#f2f5f4">212<tspan font-size="25" font-weight="400" fill="#94a6a1"> / 212</tspan></text>
 <text x="40" y="242" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#72d9ad">PASS</text>
 <text x="40" y="271" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="13" fill="#94a6a1">Unit, TUI, RPC &amp; mesh (npm test)</text>
 <path d="M310 117v165" stroke="#353e42"/>

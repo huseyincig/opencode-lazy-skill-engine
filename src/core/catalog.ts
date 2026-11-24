@@ -11,9 +11,50 @@ import { createSearchIndex, search, type SearchHit, type SearchIndex, type Searc
 import { clipped } from "./text.js";
 import { LANGUAGES, type LanguageCode } from "./concepts.js";
 import { inside } from "./security.js";
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, resolve, join } from "node:path";
 import type { LazySkillOptions } from "./config.js";
+
+function catalogFingerprint(sorted: readonly SkillEntry[]): string {
+  const hash = createHash("sha1");
+  for (const s of sorted) {
+    hash
+      .update(s.id)
+      .update("\0")
+      .update(s.name)
+      .update("\0")
+      .update(s.description)
+      .update("\0")
+      .update(s.scope)
+      .update("\0")
+      .update(s.origin)
+      .update("\0")
+      .update(s.autoinvoke === false ? "0" : "1")
+      .update("\0")
+      .update(s.path ?? "")
+      .update("\0")
+      .update(s.keywords.join("\x1f"))
+      .update("\0")
+      .update(s.aliases.join("\x1f"))
+      .update("\0")
+      .update(s.tags.join("\x1f"))
+      .update("\0")
+      .update(s.triggers.join("\x1f"))
+      .update("\0")
+      .update(s.negativeTriggers.join("\x1f"))
+      .update("\0")
+      .update(s.languages.join("\x1f"))
+      .update("\0")
+      .update(s.roles.join("\x1f"))
+      .update("\0")
+      .update((s.derivedKeywords ?? []).join("\x1f"))
+      .update("\0")
+      .update((s.derivedAliases ?? []).join("\x1f"))
+      .update("\n");
+  }
+  return hash.digest("hex");
+}
 
 const safeReal = (p: string): string => {
   try {
@@ -150,6 +191,7 @@ export class Catalog {
   private inflight: Promise<this> | null = null;
   public diagnostics: ScanDiagnostic[] = [];
   public version = 0;
+  private fingerprint = "";
   public nativeReady: boolean;
   private readonly metaCache = new Map<string, CachedFrontmatter>();
   public scanStats = { metadataReads: 0, metadataReuses: 0 };
@@ -222,12 +264,16 @@ export class Catalog {
       for (const skill of vault) all.set(skill.id, skill);
       for (const skill of native) all.set(skill.id, skill);
       const sorted = [...all.values()].sort((a, b) => a.id.localeCompare(b.id));
+      const nextFingerprint = catalogFingerprint(sorted);
       this.items = all;
-      this.index = createSearchIndex(sorted, this.opts.weights);
+      if (force || this.version === 0 || nextFingerprint !== this.fingerprint) {
+        this.index = createSearchIndex(sorted, this.opts.weights);
+        this.fingerprint = nextFingerprint;
+        this.version++;
+      }
       this.scanStats = { metadataReads, metadataReuses };
       this.diagnostics = diagnostics.slice(0, 30);
       this.next = this.nativeReady ? Date.now() + this.opts.refreshMs : 0;
-      this.version++;
       return this;
     })();
     try {

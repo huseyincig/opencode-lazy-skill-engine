@@ -172,3 +172,46 @@ test('Finding 4: LAZY_SKILL_STATS_RPC snapshot preserves both string version and
   assert.equal(typeof snap.catalogVersion, 'number');
   assert.ok(snap.catalogVersion >= 1);
 });
+
+test('Idle performance: Catalog.refresh skips redundant index rebuild when skills are unchanged, and rebuilds on edit or force', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'lse-idle-catalog-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const skillDir = join(root, '.opencode', 'skill-vault', 'perf-skill');
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(join(skillDir, 'SKILL.md'), '---\nname: Perf Skill\ndescription: Initial description\n---\nBody');
+
+  const native = [{ id: 'nat-1', name: 'Nat 1', description: 'Native skill description' }];
+  const opts = configure({ refreshMs: 0 }, { directory: root, project: { canonical: root } });
+  const catalog = new Catalog({ skill: { list: async () => ({ data: native }) } }, opts);
+
+  await catalog.refresh(true);
+  const firstIndex = catalog.index;
+  const firstVersion = catalog.version;
+
+  // Non-forced TTL refresh with zero changes must preserve index reference & catalog version
+  await catalog.refresh(false);
+  assert.strictEqual(catalog.index, firstIndex, 'unchanged TTL refresh should reuse existing SearchIndex');
+  assert.equal(catalog.version, firstVersion, 'unchanged TTL refresh should not bump catalog version');
+
+  // Explicit force refresh must rebuild index and bump version
+  await catalog.refresh(true);
+  assert.notStrictEqual(catalog.index, firstIndex, 'forced refresh must rebuild SearchIndex');
+  assert.equal(catalog.version, firstVersion + 1, 'forced refresh must bump catalog version');
+
+  const forcedIndex = catalog.index;
+  const forcedVersion = catalog.version;
+
+  // Real change (editing vault skill) must rebuild index and bump version even on non-forced refresh
+  await writeFile(join(skillDir, 'SKILL.md'), '---\nname: Perf Skill\ndescription: Updated description for rebuild\n---\nBody');
+  await catalog.refresh(false);
+  assert.notStrictEqual(catalog.index, forcedIndex, 'edited skill must trigger SearchIndex rebuild');
+  assert.equal(catalog.version, forcedVersion + 1, 'edited skill must bump catalog version');
+});
+
+test('Idle performance: LazySidebar uses 30s connected poll interval and skips no-op snapshot re-renders', async () => {
+  const src = await readFile(new URL('../src/tui.tsx', import.meta.url), 'utf8');
+  assert.match(src, /30_?000/, 'connected TUI polling interval should be 30s (30_000ms)');
+  assert.doesNotMatch(src, /setInterval\s*\([\s\S]*?,\s*5000\s*\)/, 'must not run fixed 5000ms setInterval while connected');
+  assert.match(src, /sameSnapshot\s*\(/, 'TUI should compare snapshots before updating Solid signal to avoid redundant re-renders');
+});
