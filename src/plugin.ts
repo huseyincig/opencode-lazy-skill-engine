@@ -12,6 +12,7 @@ import { clipped, detectLanguage, xmlEscape } from "./core/text.js";
 import { LANGUAGES, CONCEPT_COUNT } from "./core/concepts.js";
 import { selectBindings, resolveBaselineMode, automaticCandidates, extractExplicit, negativeTriggerMatch } from "./core/selection.js";
 import { SemanticRouter, modelFromString, type SemanticGenerator } from "./core/semantic.js";
+import { extractContextMessages, extractContextSkillTexts, planNativeSkillReuse } from "./core/reuse.js";
 import { HostSkillPolicy, hasSkillRules, isOrchestratedRoster, skillPermissionDecision, type AgentDomainLike } from "./core/host-policy.js";
 import {
   MESH_SYMBOL,
@@ -238,6 +239,16 @@ const STATUS_OUTPUT_SCHEMA = {
     semanticEnabled: { type: "boolean" },
     coexistence: { type: "string", enum: ["respect", "augment"] },
     respectHostPermissions: { type: "boolean" },
+    sessionReuse: { type: "boolean" },
+    reuse: {
+      type: "object",
+      properties: {
+        events: { type: "integer" },
+        bytes: { type: "integer" },
+      },
+      required: ["events", "bytes"],
+      additionalProperties: true,
+    },
     receipt: {
       type: ["object", "null"],
       properties: {
@@ -582,6 +593,7 @@ export interface PluginContextLike {
   };
   session?: {
     get?: (arg: { sessionID: string }) => Promise<unknown> | unknown;
+    context?: (arg: { sessionID: string }) => Promise<unknown> | unknown;
     hook?: (name: string, fn: (event: Record<string, unknown>) => Promise<void> | void) => Promise<{ dispose?: () => Promise<void> | void }>;
   };
 }
@@ -662,7 +674,14 @@ export function createPlugin() {
 
         if (typeof ctx.event?.subscribe === "function") {
           const stream = ctx.event.subscribe({
-            types: ["skill.updated", "agent.updated", "plugin.updated", "session.deleted", "session.compaction.ended"],
+            types: [
+              "skill.updated",
+              "agent.updated",
+              "plugin.updated",
+              "session.deleted",
+              "session.compaction.started",
+              "session.compaction.ended",
+            ],
             signal: eventAbort.signal,
           });
           if (stream && typeof stream[Symbol.asyncIterator] === "function") {
@@ -670,12 +689,20 @@ export function createPlugin() {
               try {
                 for await (const ev of stream) {
                   if (disposed) break;
-                  if (ev?.type === "skill.updated") catalog.invalidate();
-                  else if (ev?.type === "agent.updated") hostPolicy.clear();
-                  else if (ev?.type === "plugin.updated") {
+                  if (ev?.type === "skill.updated") {
+                    catalog.invalidate();
+                    sessions.invalidateNativeSkills();
+                  } else if (ev?.type === "agent.updated") {
+                    hostPolicy.clear();
+                  } else if (ev?.type === "plugin.updated") {
                     catalog.invalidate();
                     hostPolicy.clear();
-                  } else if (ev?.type === "session.compaction.ended" || ev?.type === "session.deleted") {
+                    sessions.invalidateNativeSkills();
+                  } else if (
+                    ev?.type === "session.compaction.started" ||
+                    ev?.type === "session.compaction.ended" ||
+                    ev?.type === "session.deleted"
+                  ) {
                     const sid =
                       ev?.properties?.info?.id ??
                       ev?.properties?.sessionID ??
@@ -685,7 +712,7 @@ export function createPlugin() {
                       ev?.data?.id ??
                       ev?.sessionID;
                     if (typeof sid === "string" && sid) {
-                      if (ev.type === "session.compaction.ended") {
+                      if (ev.type === "session.compaction.started" || ev.type === "session.compaction.ended") {
                         sessions.resetCompacted(sid);
                       } else {
                         sessions.delete(sid);
@@ -703,7 +730,7 @@ export function createPlugin() {
           try {
             return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
           } catch {
-            return "1.7.2";
+            return "1.8.0";
           }
         })();
 
@@ -1074,6 +1101,8 @@ export function createPlugin() {
                     semanticEnabled: opts.semantic.enabled,
                     coexistence: opts.coexistence,
                     respectHostPermissions: opts.respectHostPermissions,
+                    sessionReuse: opts.sessionReuse,
+                    reuse: sessions.reuseStats(),
                     receipt: sessions.receipt(context?.sessionID),
                     roots: opts.roots.length,
                     language: opts.language,
@@ -1436,9 +1465,52 @@ export function createPlugin() {
                   }
                   const pre = Array.isArray(prompt.skills) ? [...(prompt.skills as Array<{ id?: string }>)] : [];
                   const seen = new Set(pre.map((x) => x?.id).filter((x): x is string => typeof x === "string"));
+                  const promptStartedAt = Date.now();
+                  const messageID = typeof event.messageID === "string" && event.messageID ? event.messageID : undefined;
+                  const sourceHashes = new Map<string, string>();
+                  for (const id of natives) {
+                    const hash = all.items.get(id)?.contentHash;
+                    if (hash) sourceHashes.set(id, hash);
+                  }
+                  let freshNatives = natives;
+                  let reusedNatives: string[] = [];
+                  let reusedHashes = new Map<string, string>();
+                  let reusedBytes = new Map<string, number>();
+                  if (opts.sessionReuse && natives.length > 0 && typeof ctx.session?.context === "function") {
+                    const epochBefore = sessions.reuseEpoch;
+                    const records = sessions.nativeSkillRecords(sessionID);
+                    const hasCandidateRecord = natives.some((id) => records.has(id) && sourceHashes.has(id));
+                    if (hasCandidateRecord) {
+                      try {
+                        const rawCtx = await boundedLookup(
+                          Promise.resolve().then(() => ctx.session?.context?.({ sessionID })),
+                          1000
+                        );
+                        const liveMsgs = extractContextMessages(rawCtx);
+                        if (liveMsgs && sessions.reuseEpoch === epochBefore) {
+                          const reusePlan = planNativeSkillReuse({
+                            selected: natives,
+                            records,
+                            context: extractContextSkillTexts(liveMsgs),
+                            sourceHashes,
+                          });
+                          freshNatives = reusePlan.fresh;
+                          reusedNatives = reusePlan.reused;
+                          reusedHashes = reusePlan.hashes;
+                          reusedBytes = reusePlan.bytes;
+                        }
+                      } catch {}
+                    }
+                    if (sessions.reuseEpoch !== epochBefore) {
+                      freshNatives = natives;
+                      reusedNatives = [];
+                      reusedHashes = new Map();
+                      reusedBytes = new Map();
+                    }
+                  }
                   const next = [...pre];
                   const addedNatives: string[] = [];
-                  for (const id of natives) {
+                  for (const id of freshNatives) {
                     if (!seen.has(id)) {
                       seen.add(id);
                       next.push({ id });
@@ -1448,6 +1520,26 @@ export function createPlugin() {
                   if (next.length !== pre.length) {
                     prompt.skills = next;
                     attached = true;
+                  }
+                  if (reusedNatives.length > 0) {
+                    sessions.recordReuse(reusedNatives.map((id) => reusedBytes.get(id) ?? 0));
+                    attached = true;
+                  }
+                  if (opts.sessionReuse && (addedNatives.length > 0 || reusedNatives.length > 0)) {
+                    const reusedSet = new Set(reusedNatives);
+                    for (const id of [...addedNatives, ...reusedNatives]) {
+                      const sourceHash = sourceHashes.get(id);
+                      if (!sourceHash) continue;
+                      const preparedHash = reusedSet.has(id) ? reusedHashes.get(id) : undefined;
+                      sessions.upsertNativeSkill(sessionID, {
+                        skillID: id,
+                        sourceHash,
+                        ...(preparedHash ? { contentHash: preparedHash } : {}),
+                        ...(messageID ? { messageID } : {}),
+                        state: preparedHash ? "reusable" : "attached",
+                        updatedAt: promptStartedAt,
+                      });
+                    }
                   }
                   if (loaded.length) {
                     prompt.text =
@@ -1470,12 +1562,15 @@ export function createPlugin() {
                     }
                     attached = true;
                   }
-                  const boundIds = plan.ids.filter((id) => addedNatives.includes(id) || loaded.some((e) => e.skill.id === id));
+                  const boundIds = plan.ids.filter(
+                    (id) => addedNatives.includes(id) || reusedNatives.includes(id) || loaded.some((e) => e.skill.id === id)
+                  );
                   if (boundIds.length) {
+                    const hasNative = addedNatives.length > 0 || reusedNatives.length > 0;
                     sessions.record(sessionID, {
                       ids: boundIds,
                       source: plan.source,
-                      mode: addedNatives.length && loaded.length ? "mixed" : addedNatives.length ? "native" : "vault",
+                      mode: hasNative && loaded.length ? "mixed" : hasNative ? "native" : "vault",
                     });
                   }
                 }

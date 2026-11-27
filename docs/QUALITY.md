@@ -18,8 +18,10 @@ Target runtime: OpenCode V2 Promise server plugin. Local verification uses `node
 | Mesh bridge provenance, rollback, YAML/stemming & session cleanup | `tests/debug-audit.test.js` | PASS (Local) |
 | TUI sidebar lifecycle, idle polling, catalog reuse, RPC schema & conflict detection | `tests/tui-rpc.test.js` | PASS (Local) |
 | Deep-audit security (`projectAutoBind`/TOCTOU), cache-race guards & plan/status parity | `tests/deep-audit-fixes.test.js` | PASS (Local) |
-| Syntax & full unit test suite (217 tests / 17 files) | `npm run check` | PASS (Local) |
-| Package tarball surface | `npm pack --dry-run` | PASS (Local) |
+| Ranking & FS hardening (`exactId`, IDF long-query, prefix dampening, `O_NONBLOCK` + `dev`/`ino`, first-key-wins, `opendir` pinning, bounded resources) | `tests/ranking-fs-hardening.test.js` | PASS (Local) |
+| Fail-closed native session skill reuse (live-context proof, clock skew, >200 msgs, compaction/edit/update/error invalidation) | `tests/session-reuse.test.js` | PASS (Simulated host) |
+| Syntax (46 JS modules) & full unit test suite (229 tests / 19 files) | `npm run check` | PASS (Local) |
+| Package tarball surface & `npm audit` (0 high/critical) | `npm pack --dry-run`, `npm audit` | PASS (Local) |
 | Sandbox OpenCode V2.4.1 live host tool load & execution | `opencode v2.4.1 --standalone` isolated probe across all 6 `lazy_skill_*` tools (`hasOutputSchema: true`) | PASS (Isolated sandbox) |
 | Multi-plugin live load order & multi-turn sessions | Multi-plugin live host session | **NOT_RUN** |
 

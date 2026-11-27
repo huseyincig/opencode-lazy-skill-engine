@@ -1,18 +1,36 @@
-// Global (~/.config/opencode/opencode.jsonc) or project-local (<project>/opencode.jsonc) example.
-// Install from npm ("opencode-lazy-se@latest") or use a local path ("./plugins/lazy-skills").
+// Balanced default setup for global (~/.config/opencode/opencode.jsonc)
+// or project-local (<project>/opencode.jsonc).
+// All values below match the plugin's built-in defaults so you can see
+// what is active out of the box and change only what you need.
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     [
       "opencode-lazy-se@latest",
       {
+        // "auto" binds high-confidence skills in single-agent sessions and
+        // narrows automatic binding to workers in orchestrated workspaces.
         "mode": "auto",
         "autoBind": "adaptive",
+        "baselineMode": "adaptive",
+
+        // Never compete with skills already attached by the user or another plugin.
         "coexistence": "respect",
         "respectHostPermissions": true,
+
+        // Skip re-attaching native skills proven present in live session context.
+        // Fails closed (attaches fresh) on compaction, skill edits, or missing context.
+        "sessionReuse": true,
+
+        // Preserve host native skill catalog and show short advisory hints only
+        // when no skill was bound on the turn.
         "nativeCatalog": "preserve",
-        "hints": "off",
-        "vaultAutoBind": false
+        "hints": "hint",
+
+        // Global vault (~/.config/opencode/skill-vault) can bind on demand;
+        // project-local vault (.opencode/skill-vault) stays opt-in for safety.
+        "vaultAutoBind": true,
+        "projectAutoBind": false
       }
     ]
   ]

@@ -15,7 +15,9 @@ export interface ParsedQuery {
 const stop = new Set(
   (
     "a an and are as at be by can do for from has have how i in is it its of on or our please some that the their this to use using want what when where which with would you your perform full complete " +
+    "not no any only must never does out after before still without same other both each every about over under between through should could will might just also then than into onto upon may more most very here there these those such own too now why who whom whose been being was were had did done " +
     "ve veya ile icin bir bu su olarak nasil neden hangi daha bana ben bende gerekiyor simdi gore hangi yap butun tum de da mi mı mu mü " +
+    "degil yok her sadece yalnizca sonra once ama fakat ancak gibi kadar olan ise hem hic cok az " +
     "der die das den dem des ein eine und fur mit bei zu von ist bitte durchfuhren " +
     "de da do dos das para por com em o os um uma e que como favor " +
     "le la les de des du dans pour avec une un et sur que est " +
@@ -197,7 +199,7 @@ export function parseQuery(query: string, maxChars = 12000): ParsedQuery {
     phrases: phrases.slice(0, 6),
     positiveConcepts: [...matchConcepts(posRaw.join(" ")).keys()].slice(0, 20),
     negativeConcepts: [...matchConcepts(negRaw.join(" ")).keys()].slice(0, 12),
-    explicit: /(?:@|\bskill\s*[:=]\s*)([a-z0-9][a-z0-9-]{0,63})/i.exec(input)?.[1] ?? null,
+    explicit: /(?:@|(?<![-"'])\bskill\s*[:=]\s*)([a-z0-9][a-z0-9-]{0,63})/i.exec(input)?.[1] ?? null,
   };
 }
 

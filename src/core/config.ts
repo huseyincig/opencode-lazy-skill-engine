@@ -56,6 +56,7 @@ export interface LazySkillOptions {
   readonly maxFrontmatterBytes: number;
   readonly sessionTtlMs: number;
   readonly maxSessions: number;
+  readonly sessionReuse: boolean;
   readonly maxPromptChars: number;
   readonly compactDescriptionChars: number;
   readonly agents: string[];
@@ -202,6 +203,7 @@ export function configure(options: unknown = {}, location: unknown = {}): LazySk
     maxFrontmatterBytes: clampInt(options.maxFrontmatterBytes, 8192, 256, 32768),
     sessionTtlMs: clampInt(options.sessionTtlMs, 3600000, 60000, 86400000),
     maxSessions: clampInt(options.maxSessions, 200, 10, 2000),
+    sessionReuse: options.sessionReuse !== false,
     maxPromptChars: clampInt(options.maxPromptChars, 12000, 300, 100000),
     compactDescriptionChars: clampInt(options.compactDescriptionChars, 100, 30, 200),
     agents: arrayOfStrings(options.agents),

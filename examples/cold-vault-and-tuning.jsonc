@@ -1,0 +1,56 @@
+// Cold-vault roots, custom trigger rules, BM25F field weights, and exclusions.
+//
+// Useful when you keep large skill libraries outside OpenCode's eager native
+// skill directory, want to boost matching for specific domain vocabulary
+// without editing third-party SKILL.md files, or want to exclude noisy skills.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    [
+      "opencode-lazy-se@latest",
+      {
+        // Additional cold-vault directories scanned alongside the defaults
+        // (~/.config/opencode/skill-vault and <project>/.opencode/skill-vault).
+        "roots": [
+          "~/team-skill-vault",
+          "./docs/local-vault"
+        ],
+
+        // Global vault skills auto-bind by default; set projectAutoBind: true
+        // ONLY for repositories whose .opencode/skill-vault you trust.
+        "vaultAutoBind": true,
+        "projectAutoBind": true,
+
+        // Optional: shrink native skill descriptions shown in host catalog.
+        // ("preserve" is default; "compact" trims descriptions; "hide" sets autoinvoke: false)
+        "nativeCatalog": "compact",
+        "compactDescriptionChars": 120,
+
+        // Inject extra keywords/triggers per skill ID without editing SKILL.md.
+        "rules": {
+          "sqlite-migrations": ["wal checkpoint", "pragma", "schema rollback"],
+          "security-audit": ["ssrf", "toctou", "symlink traversal"]
+        },
+
+        // Hide specific skill IDs from indexing and nativeCatalog transforms.
+        "exclude": ["deprecated-legacy-skill"],
+
+        // Tune BM25F field weights (valid range: 0..20).
+        "weights": {
+          "id": 7,
+          "name": 6,
+          "keywords": 5,
+          "aliases": 4,
+          "tags": 3,
+          "triggers": 5,
+          "description": 2.2
+        },
+
+        // Default detail level for lazy_skill_search ("ids" | "summary" | "full").
+        "searchDetail": "summary",
+        "maxResults": 10,
+        "language": "auto"
+      }
+    ]
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "keywords": ["wal", "migration", "rollback", "index"],
+  "aliases": ["sqlite-schema", "db-migrate"],
+  "tags": ["database", "sqlite", "backend"],
+  "triggers": ["alter table", "schema migration", "wal checkpoint"],
+  "negativeTriggers": ["mongodb", "redis", "elasticsearch"],
+  "languages": ["en", "tr"],
+  "roles": ["coder", "reviewer"]
+}

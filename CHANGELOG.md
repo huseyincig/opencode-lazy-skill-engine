@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.8.0
+
+- **Zero-Dependency Fail-Closed Native Session Skill Reuse (`src/core/reuse.ts`, `src/core/config.ts`, `src/core/catalog.ts`, `src/core/session.ts`, `src/plugin.ts`):**
+  - Add `sessionReuse: boolean` (default `true`) to avoid re-attaching native skills that are already proven present and unchanged in live `ctx.session.context()` on follow-up turns.
+  - Compute SHA-256 `contentHash` in `normalizeNative()` when host skill content is supplied and include it in `catalogFingerprint()`.
+  - Verify live context across up to `1,000` recent messages (64 skill entries / 1 MiB fail-closed cap, 5s `CLOCK_ORDER_TOLERANCE_MS` + `messageID` matching), querying `ctx.session.context()` only when a prior native record exists (1000ms bounded lookup).
+  - Track bounded per-session `nativeSkills` (cap 64), monotonic `reuseEpoch`, and cumulative `reuse: { events, bytes }`; immediately invalidate on `session.compaction.started`, `session.compaction.ended`, `session.deleted`, `skill.updated`, `plugin.updated`, source edits, or context lookup failures.
+  - Expose `sessionReuse` and `reuse: { events, bytes }` in `lazy_skill_status` and `STATUS_OUTPUT_SCHEMA`.
+- **Ranking, Parsing & Prompt Precision (`src/core/rank.ts`, `src/core/text.ts`, `src/core/selection.ts`):**
+  - Apply the `+40` `exactId` bonus after coverage scaling so `@id` / `skill:id` queries survive even when other query words do not match.
+  - Raise long-query term selection to `MAX_QUERY_TERMS = 64` with IDF prioritization (`SHORT_QUERY_TERM_CAP = 8`) and add `sharedIdentityPrefix` dampening (`0.15x`) for ubiquitous catalog prefixes (e.g. `opencode-*`, `v2`), plus `topK` early-exit in `listAll`.
+  - Expand EN/TR stopwords, enforce single-word `negativeTriggerMatch()` across the full normalized prompt (beyond token 150), and ignore negated (`-skill:<id>`) and quoted (`"skill:<id>"`, `'skill:<id>'`) prose mentions in `extractExplicit()` / `parseQuery()`.
+- **Filesystem & Vault Hardening (`src/core/security.ts`, `src/core/scanner.ts`, `src/core/resources.ts`):**
+  - Harden `boundedOpen()` with an `lstat` pre-gate, `O_NONBLOCK`, `fstat` `dev`/`ino` identity verification, Linux `/proc/self/fd/<fd>` canonical containment checks, and a `2s` `.unref()` read deadline; apply `O_NONBLOCK` + `dev`/`ino` checks to `readSidecarSync()`.
+  - Enforce **first-key-wins** duplicate key handling in `parseFrontmatter()` (`duplicateKeys` + `DUPLICATE_FRONTMATTER_KEY:<key>` scan diagnostics) and switch `scanVaults()` to streaming `opendir` with `SKILL.md` prioritized ahead of sibling files under tight visit budgets.
+  - Bound `listResources()` traversal (`MAX_RESOURCE_VISITED = 2,000`, `1s` deadline) and export `listResourcesWithDiagnostics()`.
+- **Documentation & Examples (`README.md`, `docs/`, `examples/`, `package.json`):**
+  - Overhaul `README.md` with honest scope/boundaries and full verified coverage of all 37 `configure()` options (including `semantic.model`, `semantic.timeoutMs`, `semantic.maxCandidates`, `sessionReuse`, `rules`, `weights`, `exclude`, `agents`, and sidecar metadata).
+  - Bundle 6 validated configuration & sidecar templates in `examples/` (`opencode.jsonc`, `semantic-fallback.jsonc`, `multi-agent-roles.jsonc`, `cold-vault-and-tuning.jsonc`, `discovery-only.jsonc`, `sidecar-skill-meta.json`).
+- **Verification:**
+  - Add `tests/ranking-fs-hardening.test.js` (9 tests) and `tests/session-reuse.test.js` (3 tests), expanding the automated suite to **229 / 229** passing tests across **19** suites (`46 / 46` JS modules, `0` strict typecheck errors against `@opencode/plugin@2.4.1`, `0` audit vulnerabilities).
+
 ## 1.7.2
 
 - **Security Hardening (`src/plugin.ts`, `src/core/scanner.ts`):**

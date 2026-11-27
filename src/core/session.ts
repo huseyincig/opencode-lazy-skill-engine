@@ -1,8 +1,15 @@
+import type { NativeSkillReuseRecord } from "./reuse.js";
+
 export interface SessionReceipt {
   ids: string[];
   source: string;
   mode: "native" | "vault" | "mixed";
   at: number;
+}
+
+export interface SessionReuseStats {
+  events: number;
+  bytes: number;
 }
 
 interface SessionState {
@@ -11,12 +18,16 @@ interface SessionState {
   loads: Map<string, string>;
   receipt: SessionReceipt | null;
   semanticTasks: Map<string, string[]>;
+  nativeSkills: Map<string, NativeSkillReuseRecord>;
 }
 
 export class SessionLedger {
   private readonly ttl: number;
   private readonly max: number;
   private readonly states = new Map<string, SessionState>();
+  private reuseEvents = 0;
+  private reuseBytes = 0;
+  public reuseEpoch = 0;
 
   constructor({ sessionTtlMs, maxSessions }: { sessionTtlMs: number; maxSessions: number }) {
     this.ttl = sessionTtlMs;
@@ -33,7 +44,14 @@ export class SessionLedger {
         const oldest = this.states.keys().next().value;
         if (oldest !== undefined) this.states.delete(oldest);
       }
-      s = { last: now, hints: new Set(), loads: new Map(), receipt: null, semanticTasks: new Map() };
+      s = {
+        last: now,
+        hints: new Set(),
+        loads: new Map(),
+        receipt: null,
+        semanticTasks: new Map(),
+        nativeSkills: new Map(),
+      };
       this.states.set(id, s);
     }
     if (s) {
@@ -101,18 +119,59 @@ export class SessionLedger {
     state.semanticTasks.set(task, [...selection]);
   }
 
+  nativeSkillRecords(id: string | undefined): Map<string, NativeSkillReuseRecord> {
+    const state = this.state(id, false);
+    return state ? new Map(state.nativeSkills) : new Map();
+  }
+
+  upsertNativeSkill(id: string | undefined, record: NativeSkillReuseRecord): void {
+    const state = this.state(id);
+    if (!state) return;
+    if (!state.nativeSkills.has(record.skillID) && state.nativeSkills.size >= 64) {
+      const oldest = state.nativeSkills.keys().next().value;
+      if (oldest !== undefined) state.nativeSkills.delete(oldest);
+    }
+    state.nativeSkills.delete(record.skillID);
+    state.nativeSkills.set(record.skillID, { ...record });
+  }
+
+  recordReuse(bytesList: readonly number[]): void {
+    for (const b of bytesList) {
+      this.reuseEvents += 1;
+      if (typeof b === "number" && Number.isFinite(b) && b > 0) {
+        this.reuseBytes += Math.trunc(b);
+      }
+    }
+  }
+
+  reuseStats(): SessionReuseStats {
+    return { events: this.reuseEvents, bytes: this.reuseBytes };
+  }
+
+  invalidateNativeSkills(skillID?: string): void {
+    this.reuseEpoch += 1;
+    for (const state of this.states.values()) {
+      if (skillID) state.nativeSkills.delete(skillID);
+      else state.nativeSkills.clear();
+    }
+  }
+
   resetCompacted(id: string | undefined): void {
+    this.reuseEpoch += 1;
     const state = this.state(id, false);
     if (!state) return;
     state.loads.clear();
     state.hints.clear();
+    state.nativeSkills.clear();
   }
 
   delete(id: string | undefined): void {
+    this.reuseEpoch += 1;
     if (typeof id === "string" && id) this.states.delete(id);
   }
 
   clear(): void {
+    this.reuseEpoch += 1;
     this.states.clear();
   }
 }

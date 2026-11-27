@@ -11,6 +11,7 @@ import { createSearchIndex, search, type SearchHit, type SearchIndex, type Searc
 import { clipped } from "./text.js";
 import { LANGUAGES, type LanguageCode } from "./concepts.js";
 import { inside } from "./security.js";
+import { hashSkillContent } from "./reuse.js";
 import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, resolve, join } from "node:path";
@@ -51,6 +52,8 @@ function catalogFingerprint(sorted: readonly SkillEntry[]): string {
       .update((s.derivedKeywords ?? []).join("\x1f"))
       .update("\0")
       .update((s.derivedAliases ?? []).join("\x1f"))
+      .update("\0")
+      .update(s.contentHash ?? "")
       .update("\n");
   }
   return hash.digest("hex");
@@ -178,6 +181,7 @@ export function normalizeNative(
         base: null,
         trust: "native",
         autoinvoke: s.autoinvoke !== false,
+        ...(typeof s.content === "string" && s.content.length > 0 ? { contentHash: hashSkillContent(s.content) } : {}),
       };
     });
 }

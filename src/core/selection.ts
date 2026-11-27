@@ -48,7 +48,7 @@ export interface BindingPlan {
 export function extractExplicit(text = "", maxChars = 12000): string[] {
   if (typeof text !== "string") return [];
   return uniq(
-    [...text.slice(0, maxChars).matchAll(/\bskill\s*:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\b/gi)]
+    [...text.slice(0, maxChars).matchAll(/(?<![-"'])\bskill\s*:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\b/gi)]
       .map((m) => (m[1] ?? "").toLowerCase())
       .filter((id) => id.length > 0 && id.length <= 64)
   ).slice(0, 128);
@@ -64,7 +64,7 @@ export function negativeTriggerMatch(text: string, skill?: Pick<SkillEntry, "neg
     if (typeof raw !== "string" || raw.length > 200) continue;
     const words = tokenize(raw, true);
     if (!words.length) continue;
-    if (words.length === 1 && input.has(words[0]!)) return true;
+    if (words.length === 1 && (input.has(words[0]!) || normalized.includes(` ${words[0]!} `))) return true;
     if (words.length > 1 && normalized.includes(` ${words.join(" ")} `)) return true;
     if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(raw) && compactText.includes(fold(raw).replace(/\s+/g, ""))) {
       return true;

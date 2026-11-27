@@ -170,12 +170,22 @@ export function createSearchIndex(skills: SkillEntry[], weights: Partial<Record<
       if (weight <= 0) continue;
       const denomBase = 1.2 * (0.25 + (0.75 * len) / (avg[f] ?? 1));
       const isIdentity = f === "id" || f === "name";
+      const foldedId = fold(doc.skill.id);
       for (const [token, freq] of tf) {
-        const val = weight * (freq / (freq + denomBase));
+        const tokenDf = df.get(token) ?? 1;
+        // Dampen short 2-char prefixes (e.g. "v2", "hi") and ubiquitous catalog namespace
+        // prefixes (>35% DF) so differentiating terms stay prominent unless token === id.
+        const sharedIdentityPrefix =
+          isIdentity &&
+          n >= 4 &&
+          token !== foldedId &&
+          (token.length <= 2 || (tokenDf >= 3 && tokenDf / n > 0.35));
+        const effectiveWeight = sharedIdentityPrefix ? weight * 0.15 : weight;
+        const val = effectiveWeight * (freq / (freq + denomBase));
         const rec = parts.get(token) ?? { identity: 0, meta: 0, name: false };
         if (isIdentity) {
           rec.identity += val;
-          rec.name = true;
+          if (!sharedIdentityPrefix) rec.name = true;
         } else {
           rec.meta += val;
         }
@@ -200,7 +210,10 @@ export function createSearchIndex(skills: SkillEntry[], weights: Partial<Record<
   return { docs, postings, byId, avg, fuzzyBuckets };
 }
 
-function termsFor(raw: string, _words: string[], concepts: string[]): string[] {
+const MAX_QUERY_TERMS = 64;
+const SHORT_QUERY_TERM_CAP = 8;
+
+function termsFor(raw: string, _words: string[], concepts: string[], index?: SearchIndex): string[] {
   const out = concepts.map(conceptToken);
   const used = new Set(out);
   const source = fold(raw);
@@ -218,7 +231,34 @@ function termsFor(raw: string, _words: string[], concepts: string[]): string[] {
       out.push(term);
     }
   }
-  return out.slice(0, 24);
+  if (out.length <= MAX_QUERY_TERMS) return out;
+  if (!index) return out.slice(0, MAX_QUERY_TERMS);
+  // Prioritize concept tokens and rare (high-IDF) corpus terms so long task prompts do not drop domain terms.
+  const inCorpus: Array<{ term: string; df: number; order: number }> = [];
+  const rest: string[] = [];
+  for (let i = 0; i < out.length; i++) {
+    const term = out[i]!;
+    if (term.startsWith(C)) {
+      inCorpus.push({ term, df: index.postings.get(term)?.length ?? 0, order: i });
+      continue;
+    }
+    const direct = index.postings.get(term);
+    if (direct && direct.length > 0) {
+      inCorpus.push({ term, df: direct.length, order: i });
+      continue;
+    }
+    let stemDf = 0;
+    for (const v of variants(term)) {
+      const p = index.postings.get(v);
+      if (p && p.length > 0) stemDf = stemDf === 0 ? p.length : Math.min(stemDf, p.length);
+    }
+    if (stemDf > 0) inCorpus.push({ term, df: stemDf, order: i });
+    else rest.push(term);
+  }
+  inCorpus.sort((a, b) => a.df - b.df || a.order - b.order);
+  const prioritized = inCorpus.map((item) => item.term);
+  if (prioritized.length >= MAX_QUERY_TERMS) return prioritized.slice(0, MAX_QUERY_TERMS);
+  return [...prioritized, ...rest].slice(0, MAX_QUERY_TERMS);
 }
 
 function fuzzyAlternatives(index: SearchIndex, term: string): Array<{ term: string; weight: number }> {
@@ -246,15 +286,19 @@ export function search(index: SearchIndex, query: string, options: SearchOptions
         : null;
   const listAll = query.trim() === "" || query.trim() === "*";
   if (listAll) {
-    return index.docs
-      .filter((d) => (!options.scope || d.skill.scope === options.scope) && (!allowed || allowed.has(d.skill.id)))
-      .slice(0, topK)
-      .map((d) => ({ skill: d.skill, score: 0, coverage: 0, matched: [] }));
+    const listed: SearchHit[] = [];
+    for (const d of index.docs) {
+      if (listed.length >= topK) break;
+      if (options.scope && d.skill.scope !== options.scope) continue;
+      if (allowed && !allowed.has(d.skill.id)) continue;
+      listed.push({ skill: d.skill, score: 0, coverage: 0, matched: [] });
+    }
+    return listed;
   }
 
   const normalizedQuery = fold(query.trim());
-  const pos = termsFor(parsed.positiveRaw, parsed.positive, parsed.positiveConcepts);
-  const neg = termsFor(parsed.negativeRaw, parsed.negative, parsed.negativeConcepts);
+  const pos = termsFor(parsed.positiveRaw, parsed.positive, parsed.positiveConcepts, index);
+  const neg = termsFor(parsed.negativeRaw, parsed.negative, parsed.negativeConcepts, index);
   const alternatives = new Map<string, Array<{ term: string; weight: number }>>();
   const ids = new Set<number>();
 
@@ -331,10 +375,12 @@ export function search(index: SearchIndex, query: string, options: SearchOptions
     }
 
     const exactId = Boolean(parsed.explicit && fold(parsed.explicit) === fold(d.skill.id));
-    if (exactId) value += 40;
     if (!hits && !exactId) continue;
     const coverage = hits / Math.max(1, pos.length);
-    value *= Math.pow(coverage, 1.3) * (1 + 0.08 * Math.min(6, hits));
+    const scoreCoverage = pos.length <= SHORT_QUERY_TERM_CAP ? coverage : Math.min(1, hits / SHORT_QUERY_TERM_CAP);
+    value *= Math.pow(scoreCoverage, 1.3) * (1 + 0.08 * Math.min(6, hits));
+    // Add exact-ID bonus after coverage scaling so an exact-id-only query is never multiplied to zero.
+    if (exactId) value += 40;
     if (parsed.phrases.length) {
       const whole = fold(
         `${d.skill.id} ${d.skill.name} ${d.skill.description} ${(d.skill.keywords ?? []).join(" ")} ${(d.skill.aliases ?? []).join(" ")} ${(d.skill.triggers ?? []).join(" ")} ${(d.skill.tags ?? []).join(" ")} ${(d.skill.derivedKeywords ?? []).join(" ")} ${(d.skill.derivedAliases ?? []).join(" ")}`

@@ -1,0 +1,32 @@
+// Optional LLM semantic fallback using a fast model of your choice.
+//
+// How it works:
+// 1. Deterministic local BM25F + 13-language concept search always runs first.
+// 2. Semantic fallback runs ONLY when lexical selection has not filled the
+//    active slot limit AND the OpenCode host exposes generate.text.
+// 3. Only allowed candidate IDs + short descriptions are sent; strict JSON
+//    output is validated against the allowlist (raw model text is never injected).
+// 4. Leave "model" empty ("") to reuse the active session's current model,
+//    or pass "providerID/modelID" (optional "#variant" suffix supported).
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    [
+      "opencode-lazy-se@latest",
+      {
+        "mode": "auto",
+        "autoBind": "adaptive",
+        "sessionReuse": true,
+        "semantic": {
+          "enabled": true,
+          // Replace with any configured provider/model in your OpenCode setup
+          // (examples: "google/gemini-2.5-flash", "openai/gpt-4.1-mini",
+          // "anthropic/claude-haiku-4-5#fast", or "" for active session model).
+          "model": "google/gemini-2.5-flash",
+          "timeoutMs": 1500,
+          "maxCandidates": 40
+        }
+      }
+    ]
+  ]
+}

@@ -1,0 +1,40 @@
+// Multi-agent / role-scoped workspace configuration.
+//
+// - Primary/coordinator sessions stay clean (autoBind: "workers").
+// - Worker roles only consider skills in their own "allowed" list (intersected
+//   with host ctx.agent.list() ordered skill permissions).
+// - baselineMode: "always" binds safe non-project role defaults first, then
+//   fills remaining slots from ranked lexical hits up to role.maxActive.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    [
+      "opencode-lazy-se@latest",
+      {
+        "mode": "orchestrator",
+        "autoBind": "workers",
+        "baselineMode": "always",
+        "coexistence": "respect",
+        "respectHostPermissions": true,
+        "sessionReuse": true,
+        "minAutoScore": 1.2,
+        "maxAutoSkills": 4,
+        // Optional: restrict which agent IDs may read/auto-bind cold-vault skills.
+        // Leave omitted or [] to allow all agents permitted by host rules.
+        "agents": ["coder", "reviewer"],
+        "roles": {
+          "coder": {
+            "allowed": ["typescript-patterns", "sqlite-migrations", "tdd-workflow", "security-audit"],
+            "default": ["tdd-workflow"],
+            "maxActive": 3
+          },
+          "reviewer": {
+            "allowed": ["code-review", "security-audit", "performance-check"],
+            "default": ["code-review"],
+            "maxActive": 2
+          }
+        }
+      }
+    ]
+  ]
+}

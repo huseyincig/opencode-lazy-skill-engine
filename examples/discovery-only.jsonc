@@ -1,0 +1,18 @@
+// Discovery-only mode: keep the 6 lazy_skill_* tools, live TUI sidebar,
+// and shared V2 mesh catalog active while letting another plugin or manual
+// workflow control all skill attachments.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    [
+      "opencode-lazy-se@latest",
+      {
+        "autoBind": "off",
+        "hints": "off",
+        "nativeCatalog": "preserve",
+        "coexistence": "respect",
+        "respectHostPermissions": true
+      }
+    ]
+  ]
+}

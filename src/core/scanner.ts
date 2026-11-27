@@ -1,4 +1,5 @@
-import { readdir, lstat, realpath } from "node:fs/promises";
+import { opendir, lstat, realpath } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { constants as fsConstants, fstatSync, lstatSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -79,6 +80,8 @@ export interface SkillEntry {
   source: "native" | "vault";
   trust: "native" | "untrusted";
   autoinvoke?: boolean;
+  /** SHA-256 of raw SKILL.md source content when supplied by host (never stores raw body). */
+  contentHash?: string;
 }
 
 export interface ScanDiagnostic {
@@ -91,6 +94,7 @@ export interface CachedFrontmatter {
   meta: FrontmatterMeta;
   bodyPrefix?: string;
   sidecar?: SidecarMeta;
+  duplicateKeys?: string[];
 }
 
 export interface ScanVaultResult {
@@ -151,8 +155,11 @@ function list(v: string): string[] {
   return s && !disallowedYaml(s) ? [scalar(s)] : [];
 }
 
-/** Intentionally bounded YAML frontmatter parser; no YAML tags, anchors or execution. */
-export function parseFrontmatter(data: string, maxFrontmatterBytes = 8192): { meta: FrontmatterMeta; body: string } {
+/** Intentionally bounded YAML frontmatter parser; no YAML tags, anchors or execution. First key wins on duplicates. */
+export function parseFrontmatter(
+  data: string,
+  maxFrontmatterBytes = 8192
+): { meta: FrontmatterMeta; body: string; duplicateKeys?: string[] } {
   const src = typeof data === "string" && data.charCodeAt(0) === 0xfeff ? data.slice(1) : data;
   const open = /^---[ \t]*\r?\n/.exec(src);
   if (!open) return { meta: {}, body: src };
@@ -167,10 +174,22 @@ export function parseFrontmatter(data: string, maxFrontmatterBytes = 8192): { me
   const meta: FrontmatterMeta = {};
   let current: string | null = null;
   let block = false;
+  const seenKeys = new Set<string>();
+  const duplicateKeys: string[] = [];
+  let skipping = false;
   for (const line of fm.split(/\r?\n/)) {
     const kv = /^([a-zA-Z][\w/-]*):\s*(.*)$/.exec(line);
     if (kv) {
-      current = kv[1] ?? null;
+      const key = kv[1] ?? "";
+      if (seenKeys.has(key)) {
+        skipping = true;
+        current = null;
+        if (!duplicateKeys.includes(key)) duplicateKeys.push(key);
+        continue;
+      }
+      seenKeys.add(key);
+      skipping = false;
+      current = key || null;
       const raw = stripInlineComment(kv[2] ?? "");
       block = /^[|>][+-]?$/.test(raw);
       if (block && current) {
@@ -186,6 +205,7 @@ export function parseFrontmatter(data: string, maxFrontmatterBytes = 8192): { me
       }
       continue;
     }
+    if (skipping) continue;
     if (current && /^\s+-\s+/.test(line) && !block) {
       const item = stripInlineComment(line.replace(/^\s+-\s+/, ""));
       if (!item || disallowedYaml(item)) continue;
@@ -205,7 +225,7 @@ export function parseFrontmatter(data: string, maxFrontmatterBytes = 8192): { me
       }
     }
   }
-  return { meta, body };
+  return duplicateKeys.length ? { meta, body, duplicateKeys } : { meta, body };
 }
 
 const getList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : typeof v === "string" ? list(v) : []);
@@ -403,10 +423,14 @@ export function readSidecarSync(skillDir: string, maxBytes = 8192): SidecarMeta 
       if (st.isSymbolicLink() || !st.isFile() || st.size > maxBytes) continue;
       const canonicalFile = realpathSync(candidate);
       if (!inside(canonicalBase, canonicalFile)) continue;
-      const fd = openSync(canonicalFile, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      const fd = openSync(
+        canonicalFile,
+        fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)
+      );
       try {
         const fst = fstatSync(fd);
         if (!fst.isFile() || fst.size > maxBytes) continue;
+        if (fst.dev !== st.dev || fst.ino !== st.ino) continue;
         const buf = Buffer.allocUnsafe(Math.min(fst.size, maxBytes) + 1);
         let n = 0;
         while (n < buf.length) {
@@ -500,6 +524,23 @@ export function normalizeEntry(
   };
 }
 
+const VAULT_CLOSE_TIMEOUT_MS = 2000;
+
+async function boundedClose(handle: { close(): Promise<void> }, timeoutMs = VAULT_CLOSE_TIMEOUT_MS): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      handle.close().catch(() => undefined),
+      new Promise<void>((done) => {
+        timer = setTimeout(done, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export async function scanVaults(
   opts: Pick<LazySkillOptions, "roots" | "maxDepth" | "maxSkills" | "maxSkillBytes" | "maxFrontmatterBytes" | "project" | "exclude" | "rules">,
   cache: Map<string, CachedFrontmatter> = new Map(),
@@ -523,20 +564,39 @@ export async function scanVaults(
       continue;
     }
     let visited = 0;
+    const truncateBudget = (list: Dirent[], cap: number): void => {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      const md = list.findIndex((e) => e.name === "SKILL.md" && e.isFile());
+      if (md > 0) {
+        const [kept] = list.splice(md, 1);
+        if (kept) list.unshift(kept);
+      }
+      if (list.length > cap) list.length = cap;
+    };
     async function walk(dir: string, depth: number): Promise<void> {
       if (depth > opts.maxDepth || visited > opts.maxSkills * 8) return;
-      let entries;
+      const budget = opts.maxSkills * 8 + 1 - visited;
+      let entries: Dirent[] = [];
+      let hasSkillMd = false;
       try {
-        entries = await readdir(dir, { withFileTypes: true });
+        const handle = await opendir(dir);
+        try {
+          for await (const e of handle) {
+            if (e.name === "SKILL.md" && e.isFile()) hasSkillMd = true;
+            if (e.name.startsWith(".") || ignored.has(e.name) || e.isSymbolicLink()) continue;
+            entries.push(e);
+            if (entries.length >= budget * 2) truncateBudget(entries, budget);
+          }
+        } finally {
+          await boundedClose(handle);
+        }
       } catch (e) {
         const code = (e as NodeJS.ErrnoException)?.code;
         diagnostics.push({ root, error: code || "SCAN_FAILED" });
         return;
       }
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-      if (depth > 0 && entries.some((e) => e.name === "SKILL.md" && e.isFile())) {
-        entries = entries.filter((e) => e.name === "SKILL.md");
-      }
+      if (depth > 0 && hasSkillMd) entries = entries.filter((e) => e.name === "SKILL.md");
+      truncateBudget(entries, budget);
       for (const e of entries) {
         if (visited > opts.maxSkills * 8) break;
         if (e.name.startsWith(".") || ignored.has(e.name) || e.isSymbolicLink()) continue;
@@ -560,8 +620,10 @@ export async function scanVaults(
           let meta: FrontmatterMeta;
           let bodyPrefix: string | undefined;
           let sidecar: SidecarMeta | undefined;
+          let duplicateKeys: string[] | undefined;
           if (!force && cached?.stamp === stamp) {
             meta = cached.meta;
+            duplicateKeys = cached.duplicateKeys;
             bodyPrefix = cached.bodyPrefix;
             sidecar = cached.sidecar;
             metadataReuses++;
@@ -570,6 +632,7 @@ export async function scanVaults(
             if (text.includes("\0")) continue;
             const parsed = parseFrontmatter(text, opts.maxFrontmatterBytes);
             meta = parsed.meta;
+            duplicateKeys = parsed.duplicateKeys;
             bodyPrefix = parsed.body.slice(0, MAX_HEADING_PREFIX_CHARS);
             sidecar = sidecarStat
               ? await readSidecar(resolve(rp, ".."), sidecarStat.name, opts.maxFrontmatterBytes, realRoot)
@@ -580,7 +643,11 @@ export async function scanVaults(
               meta,
               ...(bodyPrefix ? { bodyPrefix } : {}),
               ...(sidecar ? { sidecar } : {}),
+              ...(duplicateKeys ? { duplicateKeys } : {}),
             });
+          }
+          if (duplicateKeys?.length) {
+            diagnostics.push({ root, error: `DUPLICATE_FRONTMATTER_KEY:${duplicateKeys.join(",")}` });
           }
           visitedPaths.add(rp);
           const skill = normalizeEntry(meta, rp, realRoot, r, opts, {
